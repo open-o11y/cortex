@@ -13,7 +13,7 @@ jobs:
     steps:
       - run: apt-get install git
       - name: checkout repo
-        uses: actions/checkout@v2
+        uses: actions/checkout@v1
       - run: echo "$(ls -al)"
       - run: echo $GOPATH
       - run: echo $PATH
