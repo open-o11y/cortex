@@ -13,7 +13,7 @@ jobs:
     defaults:
       run:
         shell: bash
-        working-directory: /go/src/
+        working-directory: /go
     steps:
       - run: echo "$GITHUB_WORKSPACE"
       - name: checkout repo
