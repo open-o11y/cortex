@@ -11,18 +11,14 @@ jobs:
     container:
       image: quay.io/cortexproject/build-image:update-golang-1.14.9-eb0c8d4d2
     steps:
-      - run: apt-get install git
       - name: checkout repo
         uses: actions/checkout@v1
       - run: echo "$(ls -al)"
-      - run: echo $GOPATH
-      - run: echo $PATH
-      - run: echo "$(git --version)"
-      - name: Lint
-        run: make BUILD_IN_CONTAINER=false lint
+      # - name: Lint
+      #   run: make BUILD_IN_CONTAINER=false lint
       - name: Check vendor directory is consistent
         run: make BUILD_IN_CONTAINER=false mod-check
-      - run: echo "$(ls -al /)"
+      - run: echo "$(ls -al /go/)"
       - name: Check protos are consistent.
         run: make BUILD_IN_CONTAINER=false check-protos
       - name: Check generated documentation is consistent.
