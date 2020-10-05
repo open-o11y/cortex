@@ -17,7 +17,7 @@ jobs:
     steps:
       - run: echo "$GITHUB_WORKSPACE"
       - name: checkout repo
-        uses: actions/checkout@v2
+        uses: actions/checkout@v1
       - name: Lint
         run: make BUILD_IN_CONTAINER=false lint
       - run: cat ./vendor/github.com/cortexproject/cortex/pkg/ingester/client/cortex.proto
