@@ -13,7 +13,7 @@ jobs:
     defaults:
       run:
         shell: bash
-        working-directory: /go
+        working-directory: /go/src/github.com/cortexproject/cortex
     steps:
       - name: checkout repo
         uses: actions/checkout@v1
