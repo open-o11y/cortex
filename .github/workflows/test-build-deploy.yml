@@ -20,8 +20,8 @@ jobs:
         run: make BUILD_IN_CONTAINER=false lint
       - name: Check vendor directory is consistent
         run: make BUILD_IN_CONTAINER=false mod-check
+      - run: echo "$(ls -al /)"
       - name: Check protos are consistent.
-      - run: - run: echo "$(ls -al /)"
         run: make BUILD_IN_CONTAINER=false check-protos
       - name: Check generated documentation is consistent.
         run: make BUILD_IN_CONTAINER=false check-doc
