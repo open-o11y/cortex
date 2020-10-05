@@ -18,9 +18,8 @@ jobs:
       # - name: Lint
       #   run: make BUILD_IN_CONTAINER=false lint
       # - run: cat ./vendor/github.com/cortexproject/cortex/pkg/ingester/client/cortex.proto
-      - run: |
-        echo "$(pwd)"
-        echo "$(ls -al)"
+      - run: echo "$(pwd)"
+      - run: echo "$(ls -al)"
       - name: Check vendor directory is consistent
         run: make BUILD_IN_CONTAINER=false mod-check
       - run: echo "$(ls -al /go)"
