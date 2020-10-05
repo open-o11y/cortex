@@ -17,16 +17,18 @@ jobs:
     steps:
       - name: checkout repo
         uses: actions/checkout@v1
+      - run: mkdir -p /go/src/github.com/cortexproject/cortex
+      - run: cd /go/src/github.com/cortexproject/cortex
       - run: echo "$(pwd)"
       - run: echo "$(ls -al)"
-      - name: Lint
-        run: make BUILD_IN_CONTAINER=false lint
-      - name: Check vendor directory is consistent
-        run: make BUILD_IN_CONTAINER=false mod-check
-      - run: echo "$(ls -al /go)"
-      - name: Check protos are consistent.
-        run: make BUILD_IN_CONTAINER=false check-protos
-      - name: Check generated documentation is consistent.
-        run: make BUILD_IN_CONTAINER=false check-doc
-      - name: Check white noise.
-        run: make BUILD_IN_CONTAINER=false check-white-noise
+      # - name: Lint
+      #   run: make BUILD_IN_CONTAINER=false lint
+      # - name: Check vendor directory is consistent
+      #   run: make BUILD_IN_CONTAINER=false mod-check
+      # - run: echo "$(ls -al /go)"
+      # - name: Check protos are consistent.
+      #   run: make BUILD_IN_CONTAINER=false check-protos
+      # - name: Check generated documentation is consistent.
+      #   run: make BUILD_IN_CONTAINER=false check-doc
+      # - name: Check white noise.
+      #   run: make BUILD_IN_CONTAINER=false check-white-noise
