@@ -10,10 +10,10 @@ jobs:
     runs-on: ubuntu-latest
     container:
       image: quay.io/cortexproject/build-image:update-golang-1.14.9-eb0c8d4d2
-    defaults:
-      run:
-        shell: bash
-        working-directory: /go/src/github.com/cortexproject/cortex
+    # defaults:
+    #   run:
+    #     shell: bash
+    #     working-directory: /go
     steps:
       - name: checkout repo
         uses: actions/checkout@v1
