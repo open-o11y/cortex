@@ -20,7 +20,7 @@ jobs:
       - run: mkdir -p /go/src/github.com/cortexproject/cortex
       - run: cd /go/src/github.com/cortexproject/cortex
       - run: echo "$(pwd)"
-        working-directory: cd /go/src/github.com/cortexproject/cortex
+        working-directory: cd /go/src/github.com/cortexproject/
       - run: echo "$(ls -al)"
       # - name: Lint
       #   run: make BUILD_IN_CONTAINER=false lint
