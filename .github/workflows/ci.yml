@@ -1,0 +1,81 @@
+name: ci
+on: [ push ]
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    container:
+      image: quay.io/cortexproject/build-image:update-golang-1.14.9-eb0c8d4d2
+      image: cassandra:3.11
+    environment:
+      JVM_OPTS: "-Xms1024M -Xmx1024M"
+    steps:
+      - name: checkout repo
+        uses: actions/checkout@v2
+      - name: Test
+        working-directory: /go/src/github.com/cortexproject/cortex
+        run: CASSANDRA_TEST_ADDRESSES=localhost:9042 make BUILD_IN_CONTAINER=false test
+
+  # test:
+  #   runs-on: ubuntu-latest
+  #   container:
+  #     image: circleci/golang:1.15-node
+  #   steps:
+  #     - name: setup file system permissions
+  #       run: sudo chmod -R 777 $GITHUB_WORKSPACE /github /__w/_temp
+  #     - name: checkout repo
+  #       uses: actions/checkout@v2
+  #     - name: make promu
+  #       run: make promu
+  #     - name: load go modules cache
+  #       uses: actions/cache@v2
+  #       with:
+  #         path: /home/circleci/go/pkg/mod
+  #         key: v1-{{ arch }}-{{ checksum "go.sum" }}
+  #     - name: load yarn cache
+  #       uses: actions/cache@v2
+  #       with:
+  #         path: /home/circleci/.cache/yarn
+  #         key: v3-npm-deps-{{ checksum "web/ui/react-app/yarn.lock" }}--{{ arch }}-{{ checksum "go.sum"  }}
+  #         restore-keys: v3-npm-deps--{{ arch }}-{{ checksum "go.sum"  }}
+  #     - run: make
+  #       env:
+  #           # Run garbage collection more aggressively to avoid getting OOMed during the lint phase.
+  #         GOGC: "20"
+  #         # By default Go uses GOMAXPROCS but a Circle CI executor has many
+  #         # cores (> 30) while the CPU and RAM resources are throttled. If we
+  #         # don't limit this to the number of allocated cores, the job is
+  #         # likely to get OOMed and killed.
+  #         GOOPTS: "-p 2"
+  #         GOMAXPROCS: "2"
+  #     - name: prometheus/check_proto
+  #       env:
+  #         VERSION: 3.12.3
+  #       run: |
+  #         curl -s -L https://github.com/protocolbuffers/protobuf/releases/download/v3.12.3/protoc-3.12.3-linux-x86_64.zip > /tmp/protoc.zip
+  #         unzip -d /tmp /tmp/protoc.zip
+  #         chmod +x /tmp/bin/protoc
+  #         echo "::add-path::/tmp/bin/"
+  #     - run: make proto
+  #     - run: git diff --exit-code
+  #     - name: prometheus/store_artifact prometheus
+  #       uses: actions/upload-artifact@v2
+  #       with:
+  #         name: prometheus
+  #         path: prometheus
+  #     - name: prometheus/store_artifact promtool
+  #       uses: actions/upload-artifact@v2
+  #       with:
+  #         name: promtool
+  #         path: promtool
+  # test_windows:
+  #   runs-on: windows-latest
+  #   steps:
+  #     - name: checkout repo
+  #       uses: actions/checkout@v2
+  #     - name: "update golang"
+  #       # windows-latest comes with Go 1.14.9, not Go 1.15
+  #       run: choco upgrade -y golang
+  #       shell: bash
+  #     - name: change directory to project root
+  #       run: cd /go/src/github.com/prometheus/prometheus
+  #       shell: bash
