@@ -13,8 +13,14 @@ jobs:
     steps:
       - name: checkout repo
         uses: actions/checkout@v1
-      - name: Lint
-        run: make BUILD_IN_CONTAINER=false lint
+        with:
+          path: /go/src/github.com/cortexproject/cortex
+      # - name: Lint
+      #   run: make BUILD_IN_CONTAINER=false lint
+      # - run: cat ./vendor/github.com/cortexproject/cortex/pkg/ingester/client/cortex.proto
+      - run: |
+        echo "$(pwd)"
+        echo "$(ls -al)"
       - name: Check vendor directory is consistent
         run: make BUILD_IN_CONTAINER=false mod-check
       - run: echo "$(ls -al /go)"
