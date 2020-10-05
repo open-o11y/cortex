@@ -15,6 +15,8 @@ jobs:
     steps:
       - name: checkout repo
         uses: actions/checkout@v2
+      - run: echo "$(pwd)"
+      - run: echo "$(ls /__w/)"
       - name: Run Tests
         run: CASSANDRA_TEST_ADDRESSES=localhost:3306 make BUILD_IN_CONTAINER=false test
 
