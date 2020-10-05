@@ -15,7 +15,7 @@ jobs:
         shell: bash
         working-directory: scripts
     steps:
-      - name: echo $GITHUB_WORKSPACE
+      - run: echo $GITHUB_WORKSPACE
       - name: checkout repo
         uses: actions/checkout@v2
       - name: Lint
