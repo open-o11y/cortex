@@ -13,11 +13,14 @@ jobs:
         ports:
         - 3306
     steps:
-      - run: apt-get install git
       - name: Checkout Repo
         uses: actions/checkout@v2
       - name: Check vendor directory is consistent.
-        run: make BUILD_IN_CONTAINER=false mod-check
+        run: |
+        	GO111MODULE=on go mod download
+          GO111MODULE=on go mod verify
+          GO111MODULE=on go mod tidy
+          GO111MODULE=on go mod vendor
       - name: Run Tests
         run: CASSANDRA_TEST_ADDRESSES=localhost:3306 make BUILD_IN_CONTAINER=false test
 
