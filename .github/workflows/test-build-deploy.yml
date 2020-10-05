@@ -12,7 +12,7 @@ jobs:
       image: quay.io/cortexproject/build-image:update-golang-1.14.9-eb0c8d4d2
     steps:
       - name: checkout repo
-        uses: actions/checkout@v1
+        uses: actions/checkout@v2
         with:
           path: /go/src/
       # - name: Lint
