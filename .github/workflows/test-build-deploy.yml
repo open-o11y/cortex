@@ -13,9 +13,10 @@ jobs:
     steps:
       - name: checkout repo
         uses: actions/checkout@v2
-      - run: echo "$(pwd)"
       - run: echo "$(ls -al)"
       - run: echo $GOPATH
+      - run: echo $PATH
+      - run: echo "$(git --version)"
       - name: Lint
         run: make BUILD_IN_CONTAINER=false lint
       - name: Check vendor directory is consistent
