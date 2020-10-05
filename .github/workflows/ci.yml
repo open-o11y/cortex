@@ -13,7 +13,7 @@ jobs:
         ports:
         - 3306
     steps:
-      - name: checkout repo
+      - name: Checkout Repo
         uses: actions/checkout@v2
       - name: Check vendor directory is consistent.
         run: make BUILD_IN_CONTAINER=false mod-check

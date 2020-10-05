@@ -163,7 +163,7 @@ mod-check:
 	GO111MODULE=on go mod verify
 	GO111MODULE=on go mod tidy
 	GO111MODULE=on go mod vendor
-	@git diff --exit-code -- go.sum go.mod vendor/
+	# @git diff --exit-code -- go.sum go.mod vendor/
 
 check-protos: clean-protos protos
 	@git diff --exit-code -- $(PROTO_GOS)
