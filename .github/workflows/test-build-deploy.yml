@@ -15,14 +15,13 @@ jobs:
         shell: bash
         working-directory: /go
     steps:
-      - run: echo "$GITHUB_WORKSPACE"
       - name: checkout repo
         uses: actions/checkout@v1
-      - name: Lint
-        run: make BUILD_IN_CONTAINER=false lint
       - run: cat ./vendor/github.com/cortexproject/cortex/pkg/ingester/client/cortex.proto
       - run: echo "$(pwd)"
       - run: echo "$(ls -al)"
+      - name: Lint
+        run: make BUILD_IN_CONTAINER=false lint
       - name: Check vendor directory is consistent
         run: make BUILD_IN_CONTAINER=false mod-check
       - run: echo "$(ls -al /go)"
