@@ -91,12 +91,12 @@ jobs:
           ln -s /tmp/images ./docker-images
           make BUILD_IN_CONTAINER=false save-images
       - name: Compressing Images
-        run: tar cvzf images.tar.gz /tmp/images
+        run: tar -zcvf images.tar.gz /tmp/images
       - name: Cache Images
         uses: actions/upload-artifact@v2
         with:
           name: Images
-          path: images.tar.gz
+          path: ./images.tar.gz
 
   integration:
     needs: build
@@ -123,9 +123,8 @@ jobs:
         uses: actions/download-artifact@v2
         with:
           name: Images
-          path: images.tar.gz
       - name: Uncompress Images
-        run: tar -xvzf images.tar.gz -C /
+        run: tar -zxvf images.tar.gz -C /
       - name: Load Images
         run: |
           ln -s /tmp/images ./docker-images
