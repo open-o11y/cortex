@@ -40,5 +40,6 @@ jobs:
       - name: Get Dependencies
         run: go get -v -t -d ./...
       - run: echo "$(cat /etc/hosts)"
+      - run: echo "$(ping 127.0.0.1:9042)"
       - name: Run Tests
         run: CASSANDRA_TEST_ADDRESSES=localhost:9042 make BUILD_IN_CONTAINER=false test
