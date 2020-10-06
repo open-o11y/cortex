@@ -23,9 +23,7 @@ jobs:
       # - run: mkdir -p /go/src/github.com/cortexproject/cortex
       - run: echo $GOPATH
       # - run: cd /go/src/github.com/cortexproject/cortex
-      # - name: echo pwd
-      #   run: echo "$(pwd)"
-      #   working-directory: /go/src/github.com/cortexproject/cortex
+      - run: echo "$(pwd)"
       - run: echo "$(ls -al)"
       - name: Get dependencies
         run: go get -v -t -d ./...
