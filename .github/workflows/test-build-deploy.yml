@@ -10,9 +10,9 @@ jobs:
     runs-on: ubuntu-latest
     container:
       image: quay.io/cortexproject/build-image:update-golang-1.14.9-eb0c8d4d2
-    defaults:
-      run:
-        working-directory: ${{ github.workspace}}/go/src/github.com/cortexproject/cortex
+    # defaults:
+    #   run:
+    #     working-directory: ${{ github.workspace}}/go/src/github.com/cortexproject/cortex
     env:
       GOPATH: ${{ github.workspace }}/go
     steps:
@@ -40,3 +40,32 @@ jobs:
       #   run: make BUILD_IN_CONTAINER=false check-doc
       # - name: Check white noise.
       #   run: make BUILD_IN_CONTAINER=false check-white-noise
+# ---
+# name: test-build-deploy
+
+# on:
+#   push:
+#     branches: [master]
+#   pull_request:
+
+# jobs:
+#   lint:
+#     runs-on: ubuntu-latest
+#     container:
+#       image: quay.io/cortexproject/build-image:update-golang-1.14.9-eb0c8d4d2
+#     steps:
+#       - name: checkout repo
+#         uses: actions/checkout@v1
+#       - name: Get dependencies
+#         run: go get -v -t -d ./...
+#       - name: Lint
+#         run: make BUILD_IN_CONTAINER=false lint
+#       - name: Check vendor directory is consistent
+#         run: make BUILD_IN_CONTAINER=false mod-check
+#       - run: echo "$(ls -al /go)"
+#       - name: Check protos are consistent.
+#         run: make BUILD_IN_CONTAINER=false check-protos
+#       - name: Check generated documentation is consistent.
+#         run: make BUILD_IN_CONTAINER=false check-doc
+#       - name: Check white noise.
+#         run: make BUILD_IN_CONTAINER=false check-white-noise
