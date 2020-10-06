@@ -102,17 +102,14 @@ jobs:
     container:
       image: quay.io/cortexproject/build-image:update-golang-1.14.9-eb0c8d4d2
     steps:
-      - run: echo "$(ls /usr)"
-      - run: echo "$(ls /usr/local)"
-      - run: echo "$(ls /usr/local/go)"
       - name: Upgrade golang
         run: |
           cd /tmp
           wget https://dl.google.com/go/go1.14.9.linux-amd64.tar.gz
           tar -zxvf go1.14.9.linux-amd64.tar.gz
-          sudo rm -fr /usr/local/go
-          sudo mv /tmp/go /usr/local/go
-          cd ..
+          rm -fr /usr/local/go
+          mv /tmp/go /usr/local/go
+          cd -
       - name: Link Workspace to Expected Workspace Path
         run: |
           mkdir -p /go/src/github.com/cortexproject/cortex
