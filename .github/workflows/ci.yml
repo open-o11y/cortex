@@ -96,4 +96,4 @@ jobs:
         run: | # make fails with /bin/sh: 1: sudo: not found
           touch build-image/.uptodate
           MIGRATIONS_DIR=$(pwd)/cmd/cortex/migrations
-          make BUILD_IMAGE=quay.io/cortexproject/build-image:update-golang-1.14.9-eb0c8d4d2 configs-integration-test
+          make BUILD_IMAGE_IN_CONTAINER=false configs-integration-test
