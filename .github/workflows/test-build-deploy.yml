@@ -69,7 +69,7 @@ jobs:
       # - name: Move repository to expected workspace
       #   run: mv -v $GITHUB_WORKSPACE/. /go/src/github.com/cortexproject/cortex/
       - name: Sym link expected path to github workspace
-        run: ln -s /go/src/github.com/cortexproject/cortex $GITHUB_WORKSPACE/
+        run: ln -s $GITHUB_WORKSPACE/* /go/src/github.com/cortexproject/cortex
       - name: Generate protobuf files
         run: "protoc -I /go/src:./vendor/github.com/thanos-io/thanos/pkg:./vendor/github.com/gogo/protobuf:./vendor:./pkg/ruler --gogoslick_out=plugins=grpc,Mgoogle/protobuf/any.proto=github.com/gogo/protobuf/types,:./pkg/ruler ./pkg/ruler/ruler.proto"
       - name: Lint
