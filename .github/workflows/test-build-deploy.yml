@@ -19,7 +19,7 @@ jobs:
       - name: checkout repo
         uses: actions/checkout@v1
         with:
-          path: ${{ github.workspace}}/go/src/github.com/cortexproject/cortex
+          path: ./go/src/github.com/cortexproject/cortex
       # - run: mkdir -p /go/src/github.com/cortexproject/cortex
       - run: echo $GOPATH
       # - run: cd /go/src/github.com/cortexproject/cortex
