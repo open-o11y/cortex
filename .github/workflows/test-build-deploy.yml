@@ -16,10 +16,12 @@ jobs:
       - name: Get Dependencies
         run: go get -v -t -d ./...
       - run: echo "$(ls -l /go)"
-      - name: Lint
-        run: make BUILD_IN_CONTAINER=false lint
-      - name: Check vendor directory is consistent
-        run: make BUILD_IN_CONTAINER=false mod-check
+      - run: protoc -I /go/src:./vendor/github.com/thanos-io/thanos/pkg:./vendor/github.com/gogo/protobuf:./vendor:./pkg/ruler --gogoslick_out=plugins=grpc,Mgoogle/protobuf/any.proto=github.com/gogo/protobuf/types,:./pkg/ruler ./pkg/ruler/ruler.proto
+misspell -error docs
+      # - name: Lint
+      #   run: make BUILD_IN_CONTAINER=false lint
+      # - name: Check vendor directory is consistent
+      #   run: make BUILD_IN_CONTAINER=false mod-check
       - run: echo "$(ls -l /go)"
       - name: Check protos are consistent.
         run: make BUILD_IN_CONTAINER=false check-protos
