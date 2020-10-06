@@ -20,7 +20,7 @@ jobs:
       - name: checkout repo
         uses: actions/checkout@v1
       - run: mkdir -p /go/src/github.com/cortexproject/cortex
-      - run: echo "$(GOPATH)"
+      - run: echo $GOPATH
       - run: cd /go/src/github.com/cortexproject/cortex
       - run: echo "$(pwd)"
         working-directory: cd /go/src/github.com/cortexproject/
