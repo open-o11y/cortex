@@ -112,8 +112,8 @@ jobs:
           cd /tmp
           wget https://dl.google.com/go/go1.14.9.linux-amd64.tar.gz
           tar -zxvf go1.14.9.linux-amd64.tar.gz
-          rm -fr /usr/local/go
-          mv /tmp/go /usr/local/go
+          sudo rm -fr /usr/local/go
+          sudo mv /tmp/go /usr/local/go
           cd -
       - name: Link Workspace to Expected Workspace Path
         run: |
