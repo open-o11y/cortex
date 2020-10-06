@@ -65,15 +65,12 @@ jobs:
     steps:
       - name: checkout repo
         uses: actions/checkout@v1
-      - name: Get Dependencies
-        run: go get -v -t -d ./...
-      - run: echo "$(pwd)"
-      - run: echo $GITHUB_WORKSPACE
+      # - name: Get Dependencies
+      #   run: go get -v -t -d ./...
       - run: mkdir -p /go/src/github.com/cortexproject/cortex
       - name: Copy directory to sub file
         run: cp -a $GITHUB_WORKSPACE/. /go/src/github.com/cortexproject/cortex/
-      - run: echo "$(ls -al /go/src/github.com/cortexproject/cortex/)"
-      # - run: "protoc -I /go/src:./vendor/github.com/thanos-io/thanos/pkg:./vendor/github.com/gogo/protobuf:./vendor:./pkg/ruler --gogoslick_out=plugins=grpc,Mgoogle/protobuf/any.proto=github.com/gogo/protobuf/types,:./pkg/ruler ./pkg/ruler/ruler.proto"
+      - run: "protoc -I /go/src:./vendor/github.com/thanos-io/thanos/pkg:./vendor/github.com/gogo/protobuf:./vendor:./pkg/ruler --gogoslick_out=plugins=grpc,Mgoogle/protobuf/any.proto=github.com/gogo/protobuf/types,:./pkg/ruler ./pkg/ruler/ruler.proto"
       - name: Lint
         run: make BUILD_IN_CONTAINER=false lint
         working-directory: /go/src/github.com/cortexproject/cortex/
