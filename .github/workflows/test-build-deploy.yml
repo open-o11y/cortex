@@ -61,18 +61,19 @@ jobs:
         uses: actions/upload-artifact@v2
         with:
           name: tmp images
-          path: /tmp/images
+          path: /tmp/images/
   integration-configs-db:
     needs: build
     runs-on: ubuntu-16.04
     steps:
       - name: Checkout Repo
         uses: actions/checkout@v1
+      - run: mkdir -p /tmp/images
       - name: Load cache from Build job
         uses: actions/download-artifact@v2
         with:
           name: tmp images
-          path: /tmp/images
+          path: /tmp/images/
       - name: Install Docker Client
         run: |
           set -x
