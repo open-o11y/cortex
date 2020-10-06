@@ -37,9 +37,6 @@ jobs:
     steps:
       - name: Checkout Repo
         uses: actions/checkout@v1
-      - name: Check vendor directory is consistent.
-        run: make BUILD_IN_CONTAINER=false mod-check
+      - run: echo "$(docker ps -a)"
       - name: Run Tests
-        run: | # Needs to be fixed to use service and find go/src
-          CASSANDRA_TEST_ADDRESSES=localhost:9042 \
-          make BUILD_IN_CONTAINER=false test
+        run: CASSANDRA_TEST_ADDRESSES=localhost:9042 make BUILD_IN_CONTAINER=false test
