@@ -90,7 +90,7 @@ jobs:
   #         mkdir /tmp/images
   #         ln -s /tmp/images ./docker-images
   #         make BUILD_IN_CONTAINER=false save-images
-  #     - name: Save Cache
+  #     - name: Save Cache # Needs different key
   #       uses: actions/cache@v2
   #       with:
   #         path: /tmp/images
@@ -117,8 +117,11 @@ jobs:
           cd -
       - name: Checkout Repo
         uses: actions/checkout@v1
-      - name: Load Cache # Likely working incorrectly
+      - name: Load Cache # Needs different key
         uses: actions/cache@v2
+        with:
+          path: /tmp/images
+          key: v1-cortex-{{ .Branch }}-{{ .Revision }}
       - name: Load Images
         run: ln -s /tmp/images ./docker-images; make BUILD_IN_CONTAINER=false load-images
       - name: Preload Docker Images
@@ -154,7 +157,7 @@ jobs:
   #   steps:
   #     - name: Checkout Repo
   #       uses: actions/checkout@v1
-  #     - name: Load Cache # Likely working incorrectly
+  #     - name: Load Cache # Needs different key
   #       uses: actions/cache@v2
   #       with:
   #         path: /tmp/images
