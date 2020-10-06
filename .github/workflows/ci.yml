@@ -56,6 +56,8 @@ jobs:
           curl -L -o /tmp/docker-$VER.tgz https://download.docker.com/linux/static/stable/x86_64/docker-$VER.tgz
           tar -xz -C /tmp -f /tmp/docker-$VER.tgz
           mv /tmp/docker/* /usr/bin
+      - name: Check vendor directory is consistent.
+        run: make BUILD_IN_CONTAINER=false mod-check
       - name: Build
         run: |
           touch build-image/.uptodate
@@ -64,10 +66,6 @@ jobs:
         run: |  
           touch build-image/.uptodate
           make BUILD_IN_CONTAINER=false web-build
-      # - persist_to_workspace: # Need to find GHA equivalent
-      #     root: .
-      #     paths:
-      #       - website/public/
       - uses: actions/upload-artifact@v2
         with:
           name: Frontend Protobuf
