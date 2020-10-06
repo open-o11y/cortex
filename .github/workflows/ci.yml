@@ -55,7 +55,7 @@ jobs:
           tar -xz -C /tmp -f /tmp/docker-$VER.tgz
           mv /tmp/docker/* /usr/bin
       - name: Build
-        run: | # same protoc -I error as linting
+        run: |
           touch build-image/.uptodate
           make BUILD_IN_CONTAINER=false
       - name: Buld Website
@@ -92,3 +92,8 @@ jobs:
         with:
           path: /tmp/images
           key: v1-cortex-{{ .Branch }}-{{ .Revision }}
+      - name: Integration Test
+        run: | # make fails with /bin/sh: 1: sudo: not found
+          touch build-image/.uptodate
+          MIGRATIONS_DIR=$(pwd)/cmd/cortex/migrations
+          make BUILD_IMAGE=quay.io/cortexproject/build-image:update-golang-1.14.9-eb0c8d4d2 configs-integration-test
