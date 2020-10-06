@@ -1,6 +1,38 @@
 name: ci
 on: [ push ]
+defaults:
+
 jobs:
+  lint:
+    runs-on: ubuntu-latest
+    container:
+      image: quay.io/cortexproject/build-image:update-golang-1.14.9-eb0c8d4d2
+    steps:
+      - name: checkout repo
+        uses: actions/checkout@v1
+      - run: mkdir -p /go/src/github.com/cortexproject/cortex
+      # - name: Copy directory to expected workspace
+      #   run: cp -a $GITHUB_WORKSPACE/. /go/src/github.com/cortexproject/cortex/
+      - name: Sym link expected path to github workspace
+        run: ln -s $GITHUB_WORKSPACE/* /go/src/github.com/cortexproject/cortex
+      - name: Generate protobuf files
+        run: "protoc -I /go/src:./vendor/github.com/thanos-io/thanos/pkg:./vendor/github.com/gogo/protobuf:./vendor:./pkg/ruler --gogoslick_out=plugins=grpc,Mgoogle/protobuf/any.proto=github.com/gogo/protobuf/types,:./pkg/ruler ./pkg/ruler/ruler.proto"
+      - name: Lint
+        run: make BUILD_IN_CONTAINER=false lint
+        # working-directory: /go/src/github.com/cortexproject/cortex/
+      - name: Check vendor directory is consistent
+        run: make BUILD_IN_CONTAINER=false mod-check
+        # working-directory: /go/src/github.com/cortexproject/cortex/
+      - name: Check protos are consistent.
+        run: make BUILD_IN_CONTAINER=false check-protos
+        # working-directory: /go/src/github.com/cortexproject/cortex/
+      - name: Check generated documentation is consistent.
+        run: make BUILD_IN_CONTAINER=false check-doc
+        # working-directory: /go/src/github.com/cortexproject/cortex/
+      - name: Check white noise.
+        run: make BUILD_IN_CONTAINER=false check-white-noise
+        # working-directory: /go/src/github.com/cortexproject/cortex/
+
   # test:
   #   runs-on: ubuntu-latest
   #   container:
@@ -73,23 +105,73 @@ jobs:
           path: /tmp/images
           key: v1-cortex-{{ .Branch }}-{{ .Revision }}
 
-  integration-configs-db:
+  integration:
     needs: build
     runs-on: ubuntu-16.04
     container:
       image: quay.io/cortexproject/build-image:update-golang-1.14.9-eb0c8d4d2
     steps:
+      - name: Upgrade golang
+        run: |
+          cd /tmp && \
+          wget https://dl.google.com/go/go1.14.9.linux-amd64.tar.gz && \
+          tar -zxvf go1.14.9.linux-amd64.tar.gz && \
+          sudo rm -fr /usr/local/go && \
+          sudo mv /tmp/go /usr/local/go && \
+          cd -
+      - name: Link Workspace to Expected Workspace Path
+        run: |
+          mkdir -p /go/src/github.com/cortexproject/cortex
+          mv $GITHUB_WORKSPACE/. /go/src/github.com/cortexproject/cortex/
       - name: Checkout Repo
         uses: actions/checkout@v1
       - name: Load Cache # Likely working incorrectly
         uses: actions/cache@v2
-        with:
-          path: /tmp/images
-          key: v1-cortex-{{ .Branch }}-{{ .Revision }}
-      - run: echo "$(pwd)"
-      - run: echo "$(ls -al)"
-      - name: Integration Test
-        run: | # make fails with /bin/sh: 1: sudo: not found
-          touch build-image/.uptodate
-          MIGRATIONS_DIR=$(pwd)/cmd/cortex/migrations
-          make BUILD_IMAGE=quay.io/cortexproject/build-image:update-golang-1.14.9-eb0c8d4d2 configs-integration-test
+      - name: Load Images
+        run: ln -s /tmp/images ./docker-images; make BUILD_IN_CONTAINER=false load-images
+      - name: Preload Docker Images
+        # We download docker images used by integration tests so that all images are available
+        # locally and the download time doesn't account in the test execution time, which is subject
+        # to a timeout.
+        run: |
+          docker pull minio/minio:RELEASE.2019-12-30T05-45-39Z
+          docker pull amazon/dynamodb-local:1.11.477
+          docker pull consul:0.9
+          docker pull gcr.io/etcd-development/etcd:v3.4.7
+          docker pull quay.io/cortexproject/cortex:v0.6.0
+          docker pull quay.io/cortexproject/cortex:v0.7.0
+          docker pull quay.io/cortexproject/cortex:v1.0.0
+          docker pull quay.io/cortexproject/cortex:v1.1.0
+          docker pull shopify/bigtable-emulator:0.1.0
+          docker pull rinscy/cassandra:3.11.0
+          docker pull memcached:1.6.1
+          docker pull bouncestorage/swift-aio:55ba4331
+      - name: Integration Tests
+        run: |
+          export CORTEX_IMAGE_PREFIX="${IMAGE_PREFIX:-quay.io/cortexproject/}"
+          export CORTEX_IMAGE="${CORTEX_IMAGE_PREFIX}cortex:${CIRCLE_TAG:-$(./tools/image-tag)}"
+          export CORTEX_CHECKOUT_DIR="/home/circleci/.go_workspace/src/github.com/cortexproject/cortex"
+          echo "Running integration tests with image: $CORTEX_IMAGE"
+          go test -tags=requires_docker -timeout 1200s -v -count=1 ./integration/...
+         no_output_timeout: 20m
+
+    integration-configs-db:
+      needs: build
+      runs-on: ubuntu-16.04
+      container:
+        image: quay.io/cortexproject/build-image:update-golang-1.14.9-eb0c8d4d2
+      steps:
+        - name: Checkout Repo
+          uses: actions/checkout@v1
+        - name: Load Cache # Likely working incorrectly
+          uses: actions/cache@v2
+          with:
+            path: /tmp/images
+            key: v1-cortex-{{ .Branch }}-{{ .Revision }}
+        - run: echo "$(pwd)"
+        - run: echo "$(ls -al)"
+        - name: Integration Test
+          run: | # make fails with /bin/sh: 1: sudo: not found
+            touch build-image/.uptodate
+            MIGRATIONS_DIR=$(pwd)/cmd/cortex/migrations
+            make BUILD_IMAGE=quay.io/cortexproject/build-image:update-golang-1.14.9-eb0c8d4d2 configs-integration-test
