@@ -36,8 +36,8 @@ jobs:
       - run: echo "$(ls -al)"
       - name: Integration Test
         run: |
-          touch build-image/.uptodate \
-          MIGRATIONS_DIR=$(pwd)/cmd/cortex/migrations \
+          touch build-image/.uptodate
+          MIGRATIONS_DIR=$(pwd)/cmd/cortex/migrations
           make BUILD_IMAGE=quay.io/cortexproject/build-image:update-golang-1.14.9-eb0c8d4d2 configs-integration-test
 
   # test:
