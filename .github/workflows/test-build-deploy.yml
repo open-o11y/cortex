@@ -152,23 +152,23 @@ jobs:
           echo "Running integration tests with image: $CORTEX_IMAGE"
           go test -tags=requires_docker -timeout 1200s -v -count=1 ./integration/...
 
-    integration-configs-db:
-      needs: build
-      runs-on: ubuntu-16.04
-      container:
-        image: quay.io/cortexproject/build-image:update-golang-1.14.9-eb0c8d4d2
-      steps:
-        - name: Checkout Repo
-          uses: actions/checkout@v1
-        - name: Load Cache # Likely working incorrectly
-          uses: actions/cache@v2
-          with:
-            path: /tmp/images
-            key: v1-cortex-{{ .Branch }}-{{ .Revision }}
-        - run: echo "$(pwd)"
-        - run: echo "$(ls -al)"
-        - name: Integration Test
-          run: | # make fails with /bin/sh: 1: sudo: not found
-            touch build-image/.uptodate
-            MIGRATIONS_DIR=$(pwd)/cmd/cortex/migrations
-            make BUILD_IMAGE=quay.io/cortexproject/build-image:update-golang-1.14.9-eb0c8d4d2 configs-integration-test
+  # integration-configs-db:
+  #   needs: build
+  #   runs-on: ubuntu-16.04
+  #   container:
+  #     image: quay.io/cortexproject/build-image:update-golang-1.14.9-eb0c8d4d2
+  #   steps:
+  #     - name: Checkout Repo
+  #       uses: actions/checkout@v1
+  #     - name: Load Cache # Likely working incorrectly
+  #       uses: actions/cache@v2
+  #       with:
+  #         path: /tmp/images
+  #         key: v1-cortex-{{ .Branch }}-{{ .Revision }}
+  #     - run: echo "$(pwd)"
+  #     - run: echo "$(ls -al)"
+  #     - name: Integration Test
+  #       run: | # make fails with /bin/sh: 1: sudo: not found
+  #         touch build-image/.uptodate
+  #         MIGRATIONS_DIR=$(pwd)/cmd/cortex/migrations
+  #         make BUILD_IMAGE=quay.io/cortexproject/build-image:update-golang-1.14.9-eb0c8d4d2 configs-integration-test
