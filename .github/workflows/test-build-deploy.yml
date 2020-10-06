@@ -6,43 +6,43 @@ on:
   pull_request:
 
 jobs:
-  lint:
-    runs-on: ubuntu-latest
-    container:
-      image: quay.io/cortexproject/build-image:update-golang-1.14.9-eb0c8d4d2
-    steps:
-      - name: checkout repo
-        uses: actions/checkout@v1
-      - name: Get Dependencies
-        run: go get -v -t -d ./...
-      - run: echo "$(ls -l /go)"
-      - run: "protoc -I /go/src:./vendor/github.com/thanos-io/thanos/pkg:./vendor/github.com/gogo/protobuf:./vendor:./pkg/ruler --gogoslick_out=plugins=grpc,Mgoogle/protobuf/any.proto=github.com/gogo/protobuf/types,:./pkg/ruler ./pkg/ruler/ruler.proto"
-      # - name: Lint
-      #   run: make BUILD_IN_CONTAINER=false lint
-      # - name: Check vendor directory is consistent
-      #   run: make BUILD_IN_CONTAINER=false mod-check
-      - run: echo "$(ls -l /go)"
-      - name: Check protos are consistent.
-        run: make BUILD_IN_CONTAINER=false check-protos
-      - name: Check generated documentation is consistent.
-        run: make BUILD_IN_CONTAINER=false check-doc
-      - name: Check white noise.
-        run: make BUILD_IN_CONTAINER=false check-white-noise
-  # test:
+  # lint:
   #   runs-on: ubuntu-latest
   #   container:
   #     image: quay.io/cortexproject/build-image:update-golang-1.14.9-eb0c8d4d2
-  #   services:
-  #     cassandra:
-  #       image: cassandra:3.11
-  #       env:
-  #         JVM_OPTS: "-Xms1024M -Xmx1024M"
-  #       ports:
-  #       - 9042:9042
   #   steps:
-  #     - name: Checkout Repo
+  #     - name: checkout repo
   #       uses: actions/checkout@v1
   #     - name: Get Dependencies
   #       run: go get -v -t -d ./...
-  #     - name: Run Tests
-  #       run: CASSANDRA_TEST_ADDRESSES=cassandra:9042 make BUILD_IN_CONTAINER=false test
+  #     - run: echo "$(ls -l /go)"
+  #     - run: "protoc -I /go/src:./vendor/github.com/thanos-io/thanos/pkg:./vendor/github.com/gogo/protobuf:./vendor:./pkg/ruler --gogoslick_out=plugins=grpc,Mgoogle/protobuf/any.proto=github.com/gogo/protobuf/types,:./pkg/ruler ./pkg/ruler/ruler.proto"
+  #     # - name: Lint
+  #     #   run: make BUILD_IN_CONTAINER=false lint
+  #     # - name: Check vendor directory is consistent
+  #     #   run: make BUILD_IN_CONTAINER=false mod-check
+  #     - run: echo "$(ls -l /go)"
+  #     - name: Check protos are consistent.
+  #       run: make BUILD_IN_CONTAINER=false check-protos
+  #     - name: Check generated documentation is consistent.
+  #       run: make BUILD_IN_CONTAINER=false check-doc
+  #     - name: Check white noise.
+  #       run: make BUILD_IN_CONTAINER=false check-white-noise
+  test:
+    runs-on: ubuntu-latest
+    container:
+      image: quay.io/cortexproject/build-image:update-golang-1.14.9-eb0c8d4d2
+    services:
+      cassandra:
+        image: cassandra:3.11
+        env:
+          JVM_OPTS: "-Xms1024M -Xmx1024M"
+        ports:
+        - 9042:9042
+    steps:
+      - name: Checkout Repo
+        uses: actions/checkout@v1
+      - name: Get Dependencies
+        run: go get -v -t -d ./...
+      - name: Run Tests
+        run: CASSANDRA_TEST_ADDRESSES=cassandra:9042 make BUILD_IN_CONTAINER=false test
