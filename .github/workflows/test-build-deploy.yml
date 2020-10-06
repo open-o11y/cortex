@@ -13,6 +13,9 @@ jobs:
     steps:
       - name: checkout repo
         uses: actions/checkout@v1
+      - name: Get Dependencies
+        run: go get -v -t -d ./...
+      - run: echo "$(ls -l /go)"
       - name: Lint
         run: make BUILD_IN_CONTAINER=false lint
       - name: Check vendor directory is consistent
