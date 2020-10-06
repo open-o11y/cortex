@@ -102,9 +102,9 @@ jobs:
     container:
       image: quay.io/cortexproject/build-image:update-golang-1.14.9-eb0c8d4d2
     steps:
-      - run: echo "$(ls usr)"
-      - run: echo "$(ls usr/local)"
-      - run: echo "$(ls usr/local/go)"
+      - run: echo "$(ls /usr)"
+      - run: echo "$(ls /usr/local)"
+      - run: echo "$(ls /usr/local/go)"
       - name: Upgrade golang
         run: |
           cd /tmp
