@@ -66,25 +66,27 @@ jobs:
       - name: checkout repo
         uses: actions/checkout@v1
       - run: mkdir -p /go/src/github.com/cortexproject/cortex
-      - name: Copy directory to expected workspace
-        run: cp -a $GITHUB_WORKSPACE/. /go/src/github.com/cortexproject/cortex/
+      # - name: Copy directory to expected workspace
+      #   run: cp -a $GITHUB_WORKSPACE/. /go/src/github.com/cortexproject/cortex/
+      - name: Sym link expected path to github workspace
+        run: ln -s $GITHUB_WORKSPACE/* /go/src/github.com/cortexproject/cortex
       - name: Generate protobuf files
         run: "protoc -I /go/src:./vendor/github.com/thanos-io/thanos/pkg:./vendor/github.com/gogo/protobuf:./vendor:./pkg/ruler --gogoslick_out=plugins=grpc,Mgoogle/protobuf/any.proto=github.com/gogo/protobuf/types,:./pkg/ruler ./pkg/ruler/ruler.proto"
       - name: Lint
         run: make BUILD_IN_CONTAINER=false lint
-        working-directory: /go/src/github.com/cortexproject/cortex/
+        # working-directory: /go/src/github.com/cortexproject/cortex/
       - name: Check vendor directory is consistent
         run: make BUILD_IN_CONTAINER=false mod-check
-        working-directory: /go/src/github.com/cortexproject/cortex/
+        # working-directory: /go/src/github.com/cortexproject/cortex/
       - name: Check protos are consistent.
         run: make BUILD_IN_CONTAINER=false check-protos
-        working-directory: /go/src/github.com/cortexproject/cortex/
+        # working-directory: /go/src/github.com/cortexproject/cortex/
       - name: Check generated documentation is consistent.
         run: make BUILD_IN_CONTAINER=false check-doc
-        working-directory: /go/src/github.com/cortexproject/cortex/
+        # working-directory: /go/src/github.com/cortexproject/cortex/
       - name: Check white noise.
         run: make BUILD_IN_CONTAINER=false check-white-noise
-        working-directory: /go/src/github.com/cortexproject/cortex/
+        # working-directory: /go/src/github.com/cortexproject/cortex/
   test:
     runs-on: ubuntu-latest
     container:
