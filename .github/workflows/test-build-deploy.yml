@@ -1,5 +1,8 @@
 name: ci
-on: [ push ]
+on:
+  push:
+    branches:
+      -master
 jobs:
   # lint:
   #   runs-on: ubuntu-latest
@@ -8,9 +11,10 @@ jobs:
   #   steps:
   #     - name: checkout repo
   #       uses: actions/checkout@v1
-  #     - run: mkdir -p /go/src/github.com/cortexproject/cortex
   #     - name: Sym link expected path to github workspace
-  #       run: ln -s $GITHUB_WORKSPACE/* /go/src/github.com/cortexproject/cortex
+  #       run: |
+  #         mkdir -p /go/src/github.com/cortexproject/cortex
+  #         ln -s $GITHUB_WORKSPACE/* /go/src/github.com/cortexproject/cortex
   #     - name: Generate protobuf files
   #       run: "protoc -I /go/src:./vendor/github.com/thanos-io/thanos/pkg:./vendor/github.com/gogo/protobuf:./vendor:./pkg/ruler --gogoslick_out=plugins=grpc,Mgoogle/protobuf/any.proto=github.com/gogo/protobuf/types,:./pkg/ruler ./pkg/ruler/ruler.proto"
   #     - name: Lint
@@ -119,6 +123,10 @@ jobs:
           cd -
       - name: Checkout Repo
         uses: actions/checkout@v1
+      - name: Sym link expected path to github workspace
+        run: |
+          mkdir -p /go/src/github.com/cortexproject/cortex
+          ln -s $GITHUB_WORKSPACE/* /go/src/github.com/cortexproject/cortex
       - name: Restore Images
         uses: actions/download-artifact@v2
         with:
@@ -150,7 +158,7 @@ jobs:
         run: |
           export CORTEX_IMAGE_PREFIX="${IMAGE_PREFIX:-quay.io/cortexproject/}"
           export CORTEX_IMAGE="${CORTEX_IMAGE_PREFIX}cortex:${CIRCLE_TAG:-$(./tools/image-tag)}"
-          export CORTEX_CHECKOUT_DIR="/home/circleci/.go_workspace/src/github.com/cortexproject/cortex"
+          export CORTEX_CHECKOUT_DIR="/go/src/github.com/cortexproject/cortex"
           echo "Running integration tests with image: $CORTEX_IMAGE"
           go test -tags=requires_docker -timeout 1200s -v -count=1 ./integration/...
 
