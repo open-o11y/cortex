@@ -112,7 +112,7 @@ jobs:
           tar -zxvf go1.14.9.linux-amd64.tar.gz
           sudo rm -fr /usr/local/go
           sudo mv /tmp/go /usr/local/go
-          cd -
+          cd ..
       - name: Link Workspace to Expected Workspace Path
         run: |
           mkdir -p /go/src/github.com/cortexproject/cortex
