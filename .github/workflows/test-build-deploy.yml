@@ -125,7 +125,7 @@ jobs:
           name: Images
           path: images.tar.gz
       - name: Uncompress Images
-        run: tar -xvf images.tar.gz -C /
+        run: tar -xvzf images.tar.gz -C /
       - name: Load Images
         run: |
           ln -s /tmp/images ./docker-images
