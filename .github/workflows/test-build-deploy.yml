@@ -1,35 +1,28 @@
 name: ci
 on: [ push ]
 jobs:
-  lint:
-    runs-on: ubuntu-latest
-    container:
-      image: quay.io/cortexproject/build-image:update-golang-1.14.9-eb0c8d4d2
-    steps:
-      - name: checkout repo
-        uses: actions/checkout@v1
-      - run: mkdir -p /go/src/github.com/cortexproject/cortex
-      # - name: Copy directory to expected workspace
-      #   run: cp -a $GITHUB_WORKSPACE/. /go/src/github.com/cortexproject/cortex/
-      - name: Sym link expected path to github workspace
-        run: ln -s $GITHUB_WORKSPACE/* /go/src/github.com/cortexproject/cortex
-      - name: Generate protobuf files
-        run: "protoc -I /go/src:./vendor/github.com/thanos-io/thanos/pkg:./vendor/github.com/gogo/protobuf:./vendor:./pkg/ruler --gogoslick_out=plugins=grpc,Mgoogle/protobuf/any.proto=github.com/gogo/protobuf/types,:./pkg/ruler ./pkg/ruler/ruler.proto"
-      - name: Lint
-        run: make BUILD_IN_CONTAINER=false lint
-        # working-directory: /go/src/github.com/cortexproject/cortex/
-      - name: Check vendor directory is consistent
-        run: make BUILD_IN_CONTAINER=false mod-check
-        # working-directory: /go/src/github.com/cortexproject/cortex/
-      - name: Check protos are consistent.
-        run: make BUILD_IN_CONTAINER=false check-protos
-        # working-directory: /go/src/github.com/cortexproject/cortex/
-      - name: Check generated documentation is consistent.
-        run: make BUILD_IN_CONTAINER=false check-doc
-        # working-directory: /go/src/github.com/cortexproject/cortex/
-      - name: Check white noise.
-        run: make BUILD_IN_CONTAINER=false check-white-noise
-        # working-directory: /go/src/github.com/cortexproject/cortex/
+  # lint:
+  #   runs-on: ubuntu-latest
+  #   container:
+  #     image: quay.io/cortexproject/build-image:update-golang-1.14.9-eb0c8d4d2
+  #   steps:
+  #     - name: checkout repo
+  #       uses: actions/checkout@v1
+  #     - run: mkdir -p /go/src/github.com/cortexproject/cortex
+  #     - name: Sym link expected path to github workspace
+  #       run: ln -s $GITHUB_WORKSPACE/* /go/src/github.com/cortexproject/cortex
+  #     - name: Generate protobuf files
+  #       run: "protoc -I /go/src:./vendor/github.com/thanos-io/thanos/pkg:./vendor/github.com/gogo/protobuf:./vendor:./pkg/ruler --gogoslick_out=plugins=grpc,Mgoogle/protobuf/any.proto=github.com/gogo/protobuf/types,:./pkg/ruler ./pkg/ruler/ruler.proto"
+  #     - name: Lint
+  #       run: make BUILD_IN_CONTAINER=false lint
+  #     - name: Check vendor directory is consistent
+  #       run: make BUILD_IN_CONTAINER=false mod-check
+  #     - name: Check protos are consistent.
+  #       run: make BUILD_IN_CONTAINER=false check-protos
+  #     - name: Check generated documentation is consistent.
+  #       run: make BUILD_IN_CONTAINER=false check-doc
+  #     - name: Check white noise.
+  #       run: make BUILD_IN_CONTAINER=false check-white-noise
 
   # test:
   #   runs-on: ubuntu-latest
@@ -50,72 +43,75 @@ jobs:
   #     - name: Run Tests
   #       run: CASSANDRA_TEST_ADDRESSES=cassandra:9042 make BUILD_IN_CONTAINER=false test
 
-  build:
-    runs-on: ubuntu-latest
-    container:
-      image: quay.io/cortexproject/build-image:update-golang-1.14.9-eb0c8d4d2
-    steps:
-      - name: Checkout Repo
-        uses: actions/checkout@v1
-      - name: Install Docker Client
-        run: |
-          set -x
-          VER="17.03.0-ce"
-          curl -L -o /tmp/docker-$VER.tgz https://download.docker.com/linux/static/stable/x86_64/docker-$VER.tgz
-          tar -xz -C /tmp -f /tmp/docker-$VER.tgz
-          mv /tmp/docker/* /usr/bin
-      - name: Build
-        run: |
-          touch build-image/.uptodate
-          make BUILD_IN_CONTAINER=false
-      - name: Buld Website
-        run: |  
-          touch build-image/.uptodate
-          make BUILD_IN_CONTAINER=false web-build
-      - uses: actions/upload-artifact@v2
-        with:
-          name: Frontend Protobuf
-          path: pkg/querier/frontend/frontend.pb.go
-      - uses: actions/upload-artifact@v2
-        with:
-          name: Caching Index Client Protobuf
-          path: pkg/chunk/storage/caching_index_client.pb.go
-      - uses: actions/upload-artifact@v2
-        with:
-          name: Ring Protobuf
-          path: pkg/ring/ring.pb.go
-      - uses: actions/upload-artifact@v2
-        with:
-          name: Cortex Protobuf
-          path: pkg/ingester/client/cortex.pb.go
-      - uses: actions/upload-artifact@v2
-        with:
-          name: Rules Protobuf
-          path: pkg/ruler/rules/rules.pb.go
-      - name: Save Images
-        run: |
-          mkdir /tmp/images
-          ln -s /tmp/images ./docker-images
-          make BUILD_IN_CONTAINER=false save-images
-      - name: Save Cache
-        uses: actions/cache@v2
-        with:
-          path: /tmp/images
-          key: v1-cortex-{{ .Branch }}-{{ .Revision }}
+  # build:
+  #   runs-on: ubuntu-latest
+  #   container:
+  #     image: quay.io/cortexproject/build-image:update-golang-1.14.9-eb0c8d4d2
+  #   steps:
+  #     - name: Checkout Repo
+  #       uses: actions/checkout@v1
+  #     - name: Install Docker Client
+  #       run: |
+  #         set -x
+  #         VER="17.03.0-ce"
+  #         curl -L -o /tmp/docker-$VER.tgz https://download.docker.com/linux/static/stable/x86_64/docker-$VER.tgz
+  #         tar -xz -C /tmp -f /tmp/docker-$VER.tgz
+  #         mv /tmp/docker/* /usr/bin
+  #     - name: Build
+  #       run: |
+  #         touch build-image/.uptodate
+  #         make BUILD_IN_CONTAINER=false
+  #     - name: Buld Website
+  #       run: |  
+  #         touch build-image/.uptodate
+  #         make BUILD_IN_CONTAINER=false web-build
+  #     - uses: actions/upload-artifact@v2
+  #       with:
+  #         name: Frontend Protobuf
+  #         path: pkg/querier/frontend/frontend.pb.go
+  #     - uses: actions/upload-artifact@v2
+  #       with:
+  #         name: Caching Index Client Protobuf
+  #         path: pkg/chunk/storage/caching_index_client.pb.go
+  #     - uses: actions/upload-artifact@v2
+  #       with:
+  #         name: Ring Protobuf
+  #         path: pkg/ring/ring.pb.go
+  #     - uses: actions/upload-artifact@v2
+  #       with:
+  #         name: Cortex Protobuf
+  #         path: pkg/ingester/client/cortex.pb.go
+  #     - uses: actions/upload-artifact@v2
+  #       with:
+  #         name: Rules Protobuf
+  #         path: pkg/ruler/rules/rules.pb.go
+  #     - name: Save Images
+  #       run: |
+  #         mkdir /tmp/images
+  #         ln -s /tmp/images ./docker-images
+  #         make BUILD_IN_CONTAINER=false save-images
+  #     - name: Save Cache
+  #       uses: actions/cache@v2
+  #       with:
+  #         path: /tmp/images
+  #         key: v1-cortex-{{ .Branch }}-{{ .Revision }}
 
   integration:
-    needs: build
+    # needs: build
     runs-on: ubuntu-16.04
     container:
       image: quay.io/cortexproject/build-image:update-golang-1.14.9-eb0c8d4d2
     steps:
       - name: Upgrade golang
+        run: echo "$(ls usr)"
+        run: echo "$(ls usr/local)"
+        run: echo "$(ls usr/local/go)"
         run: |
-          cd /tmp && \
-          wget https://dl.google.com/go/go1.14.9.linux-amd64.tar.gz && \
-          tar -zxvf go1.14.9.linux-amd64.tar.gz && \
-          sudo rm -fr /usr/local/go && \
-          sudo mv /tmp/go /usr/local/go && \
+          cd /tmp
+          wget https://dl.google.com/go/go1.14.9.linux-amd64.tar.gz
+          tar -zxvf go1.14.9.linux-amd64.tar.gz
+          sudo rm -fr /usr/local/go
+          sudo mv /tmp/go /usr/local/go
           cd -
       - name: Link Workspace to Expected Workspace Path
         run: |
