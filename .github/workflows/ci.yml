@@ -34,7 +34,7 @@ jobs:
       - run: echo "$(pwd)"
       - run: echo "$(ls -al)"
       - name: Integration Test
-        working_directory: /__w/cortexproject/cortex
+        work_directory: /__w/cortexproject/cortex
         run: |
           touch build-image/.uptodate \
           MIGRATIONS_DIR=$(pwd)/cmd/cortex/migrations \
