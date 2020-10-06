@@ -10,9 +10,9 @@ jobs:
     runs-on: ubuntu-latest
     container:
       image: quay.io/cortexproject/build-image:update-golang-1.14.9-eb0c8d4d2
-    defaults:
-      run:
-        working-directory: ${{ github.workspace}}/go/src/github.com/cortexproject/cortex
+    # defaults:
+    #   run:
+    #     working-directory: ${{ github.workspace}}/go/src/github.com/cortexproject/cortex
     env:
       GOPATH: ${{ github.workspace }}/go
     steps:
