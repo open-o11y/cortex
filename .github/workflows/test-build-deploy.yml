@@ -115,10 +115,6 @@ jobs:
           sudo rm -fr /usr/local/go
           sudo mv /tmp/go /usr/local/go
           cd -
-      - name: Link Workspace to Expected Workspace Path
-        run: |
-          mkdir -p /go/src/github.com/cortexproject/cortex
-          mv $GITHUB_WORKSPACE/. /go/src/github.com/cortexproject/cortex/
       - name: Checkout Repo
         uses: actions/checkout@v1
       - name: Load Cache # Likely working incorrectly
