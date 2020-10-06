@@ -1,7 +1,5 @@
 name: ci
 on: [ push ]
-defaults:
-
 jobs:
   lint:
     runs-on: ubuntu-latest
