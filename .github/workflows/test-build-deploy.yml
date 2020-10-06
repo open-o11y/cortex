@@ -30,6 +30,10 @@ jobs:
           make BUILD_IN_CONTAINER=false web-build
       - uses: actions/upload-artifact@v2
         with:
+          name: website public
+          path: website/public/
+      - uses: actions/upload-artifact@v2
+        with:
           name: Frontend Protobuf
           path: pkg/querier/frontend/frontend.pb.go
       - uses: actions/upload-artifact@v2
@@ -53,54 +57,77 @@ jobs:
           mkdir /tmp/images
           ln -s /tmp/images ./docker-images
           make BUILD_IN_CONTAINER=false save-images
-      - name: Save Cache
-        uses: actions/cache@v2
+      - name: Upload /tmp/images
+        uses: actions/upload-artifact@v2
         with:
+          name: tmp images
           path: /tmp/images
-          key: v1-cortex-{{ .Branch }}-{{ .Revision }}
-  lint:
-    runs-on: ubuntu-latest
-    container:
-      image: quay.io/cortexproject/build-image:update-golang-1.14.9-eb0c8d4d2
-    steps:
-      - name: checkout repo
-        uses: actions/checkout@v1
-      - run: mkdir -p /go/src/github.com/cortexproject/cortex
-      - name: Copy directory to expected workspace
-        run: cp -a $GITHUB_WORKSPACE/. /go/src/github.com/cortexproject/cortex/
-      - name: Generate protobuf files
-        run: "protoc -I /go/src:./vendor/github.com/thanos-io/thanos/pkg:./vendor/github.com/gogo/protobuf:./vendor:./pkg/ruler --gogoslick_out=plugins=grpc,Mgoogle/protobuf/any.proto=github.com/gogo/protobuf/types,:./pkg/ruler ./pkg/ruler/ruler.proto"
-        working-directory: /go/src/github.com/cortexproject/cortex/
-      - name: Lint
-        run: make BUILD_IN_CONTAINER=false lint
-        working-directory: /go/src/github.com/cortexproject/cortex/
-      - name: Check vendor directory is consistent
-        run: make BUILD_IN_CONTAINER=false mod-check
-        working-directory: /go/src/github.com/cortexproject/cortex/
-      - name: Check protos are consistent.
-        run: make BUILD_IN_CONTAINER=false check-protos
-        working-directory: /go/src/github.com/cortexproject/cortex/
-      - name: Check generated documentation is consistent.
-        run: make BUILD_IN_CONTAINER=false check-doc
-        working-directory: /go/src/github.com/cortexproject/cortex/
-      - name: Check white noise.
-        run: make BUILD_IN_CONTAINER=false check-white-noise
-        working-directory: /go/src/github.com/cortexproject/cortex/
-  test:
-    runs-on: ubuntu-latest
-    container:
-      image: quay.io/cortexproject/build-image:update-golang-1.14.9-eb0c8d4d2
-    services:
-      cassandra:
-        image: cassandra:3.11
-        env:
-          JVM_OPTS: "-Xms1024M -Xmx1024M"
-        ports:
-        - 9042:9042
+  integration-configs-db:
+    needs: build
+    runs-on: ubuntu-16.04
     steps:
       - name: Checkout Repo
         uses: actions/checkout@v1
-      - name: Get Dependencies
-        run: go get -v -t -d ./...
-      - name: Run Tests
-        run: CASSANDRA_TEST_ADDRESSES=cassandra:9042 make BUILD_IN_CONTAINER=false test
+      - name: Load cache from Build job
+        uses: actions/download-artifact@v2
+        with:
+          name: tmp images
+          path: /tmp/images
+      - name: Install Docker Client
+        run: |
+          set -x
+          VER="17.03.0-ce"
+          curl -L -o /tmp/docker-$VER.tgz https://download.docker.com/linux/static/stable/x86_64/docker-$VER.tgz
+          tar -xz -C /tmp -f /tmp/docker-$VER.tgz
+          mv /tmp/docker/* /usr/bin
+      - name: Integration Test
+        run: |
+          touch build-image/.uptodate
+          MIGRATIONS_DIR=$(pwd)/cmd/cortex/migrations
+          make BUILD_IMAGE=quay.io/cortexproject/build-image:update-golang-1.14.9-eb0c8d4d2 configs-integration-test
+  # lint:
+  #   runs-on: ubuntu-latest
+  #   container:
+  #     image: quay.io/cortexproject/build-image:update-golang-1.14.9-eb0c8d4d2
+  #   steps:
+  #     - name: checkout repo
+  #       uses: actions/checkout@v1
+  #     - run: mkdir -p /go/src/github.com/cortexproject/cortex
+  #     - name: Copy directory to expected workspace
+  #       run: cp -a $GITHUB_WORKSPACE/. /go/src/github.com/cortexproject/cortex/
+  #     - name: Generate protobuf files
+  #       run: "protoc -I /go/src:./vendor/github.com/thanos-io/thanos/pkg:./vendor/github.com/gogo/protobuf:./vendor:./pkg/ruler --gogoslick_out=plugins=grpc,Mgoogle/protobuf/any.proto=github.com/gogo/protobuf/types,:./pkg/ruler ./pkg/ruler/ruler.proto"
+  #       working-directory: /go/src/github.com/cortexproject/cortex/
+  #     - name: Lint
+  #       run: make BUILD_IN_CONTAINER=false lint
+  #       working-directory: /go/src/github.com/cortexproject/cortex/
+  #     - name: Check vendor directory is consistent
+  #       run: make BUILD_IN_CONTAINER=false mod-check
+  #       working-directory: /go/src/github.com/cortexproject/cortex/
+  #     - name: Check protos are consistent.
+  #       run: make BUILD_IN_CONTAINER=false check-protos
+  #       working-directory: /go/src/github.com/cortexproject/cortex/
+  #     - name: Check generated documentation is consistent.
+  #       run: make BUILD_IN_CONTAINER=false check-doc
+  #       working-directory: /go/src/github.com/cortexproject/cortex/
+  #     - name: Check white noise.
+  #       run: make BUILD_IN_CONTAINER=false check-white-noise
+  #       working-directory: /go/src/github.com/cortexproject/cortex/
+  # test:
+  #   runs-on: ubuntu-latest
+  #   container:
+  #     image: quay.io/cortexproject/build-image:update-golang-1.14.9-eb0c8d4d2
+  #   services:
+  #     cassandra:
+  #       image: cassandra:3.11
+  #       env:
+  #         JVM_OPTS: "-Xms1024M -Xmx1024M"
+  #       ports:
+  #       - 9042:9042
+  #   steps:
+  #     - name: Checkout Repo
+  #       uses: actions/checkout@v1
+  #     - name: Get Dependencies
+  #       run: go get -v -t -d ./...
+  #     - name: Run Tests
+  #       run: CASSANDRA_TEST_ADDRESSES=cassandra:9042 make BUILD_IN_CONTAINER=false test
