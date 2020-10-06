@@ -12,19 +12,20 @@ jobs:
       image: quay.io/cortexproject/build-image:update-golang-1.14.9-eb0c8d4d2
     defaults:
       run:
-        working-directory: /go/src/github.com/cortexproject/cortex
+        working-directory: ${{ github.workspace}}/go/src/github.com/cortexproject/cortex
     env:
-      GOPATH: ${{ github.workspace }}
+      GOPATH: ${{ github.workspace }}/go
     steps:
       - name: checkout repo
         uses: actions/checkout@v1
-      - run: mkdir -p /go/src/github.com/cortexproject/cortex
+        with: ${{ github.workspace}}/go/src/github.com/cortexproject/cortex
+      # - run: mkdir -p /go/src/github.com/cortexproject/cortex
       - run: echo $GOPATH
-      - run: cd /go/src/github.com/cortexproject/cortex
+      # - run: cd /go/src/github.com/cortexproject/cortex
       # - name: echo pwd
       #   run: echo "$(pwd)"
       #   working-directory: /go/src/github.com/cortexproject/cortex
-      # - run: echo "$(ls -al)"
+      - run: echo "$(ls -al)"
       - name: Get dependencies
         run: go get -v -t -d ./...
       # - name: Lint
