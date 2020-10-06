@@ -16,8 +16,6 @@ jobs:
       # - run: mkdir -p /go/src/github.com/cortexproject/cortex
       # - name: Copy directory to expected workspace
       #   run: cp -a $GITHUB_WORKSPACE/. /go/src/github.com/cortexproject/cortex/
-      - name: zip up /tmp/images for uploading
-        run: tar -h
       - name: Install Docker Client
         run: |
           set -x
@@ -64,11 +62,14 @@ jobs:
           mkdir /tmp/images
           ln -s /tmp/images ./docker-images
           make BUILD_IN_CONTAINER=false save-images
+      - name: zip /tmp/images for uploading
+        run: tar -czvf images.tar.gz /tmp/images
+      - run: echo "$(ls -al)"
       - name: Upload /tmp/images
         uses: actions/upload-artifact@v2
         with:
           name: tmp images
-          path: /tmp/images/
+          path: ./images.tar.gz
 #   integration-configs-db:
 #     needs: build
 #     runs-on: ubuntu-16.04
