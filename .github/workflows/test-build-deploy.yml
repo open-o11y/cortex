@@ -67,7 +67,7 @@ jobs:
         uses: actions/checkout@v1
       - run: mkdir -p /go/src/github.com/cortexproject/cortex
       - name: Move repository to expected workspace
-        run: mv -v $GITHUB_WORKSPACE/. /go/src/github.com/cortexproject/cortex/
+        run: mv -v $GITHUB_WORKSPACE/ /go/src/github.com/cortexproject/cortex/
       - name: Generate protobuf files
         run: "protoc -I /go/src:./vendor/github.com/thanos-io/thanos/pkg:./vendor/github.com/gogo/protobuf:./vendor:./pkg/ruler --gogoslick_out=plugins=grpc,Mgoogle/protobuf/any.proto=github.com/gogo/protobuf/types,:./pkg/ruler ./pkg/ruler/ruler.proto"
       - name: Lint
