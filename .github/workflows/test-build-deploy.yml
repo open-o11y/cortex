@@ -14,15 +14,16 @@ jobs:
     #   run:
     #     shell: bash
     #     working-directory: /go
-    # env:
-    #   GOPATH: ${{ GITHUB_WORKSPACE }}
+    env:
+      GOPATH: ${{ GITHUB_WORKSPACE }}
     steps:
       - name: checkout repo
         uses: actions/checkout@v1
       - run: mkdir -p /go/src/github.com/cortexproject/cortex
       - run: echo $GOPATH
       - run: cd /go/src/github.com/cortexproject/cortex
-      - run: echo "$(pwd)"
+      - name: echo pwd
+        run: echo "$(pwd)"
         working-directory: cd /go/src/github.com/cortexproject/
       - run: echo "$(ls -al)"
       # - name: Lint
