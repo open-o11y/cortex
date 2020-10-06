@@ -14,8 +14,8 @@ jobs:
     #   run:
     #     shell: bash
     #     working-directory: /go
-    env:
-      GOPATH: ${{ github.workspace }}
+    # env:
+    #   GOPATH: ${{ github.workspace }}
     steps:
       - name: checkout repo
         uses: actions/checkout@v1
