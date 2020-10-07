@@ -204,7 +204,7 @@ jobs:
             MIGRATIONS_DIR=$(pwd)/cmd/cortex/migrations
             make BUILD_IMAGE=quay.io/cortexproject/build-image:update-golang-1.14.9-eb0c8d4d2 TTY='' configs-integration-test
   deploy_website:
-    needs: [build, test]
+    needs: build # actual line: [build, test] but keeping at [build] for rapid testing
     runs-on: ubuntu-latest
     container:
       image: quay.io/cortexproject/build-image:update-golang-1.14.9-eb0c8d4d2
@@ -215,5 +215,10 @@ jobs:
         run: |
           mkdir -p /go/src/github.com/cortexproject/cortex
           ln -s $GITHUB_WORKSPACE/* /go/src/github.com/cortexproject/cortex
+      - name: download website from build job
+        uses: actions/download-artifact@v2
+          with:
+            name: website public
+            path: website/public
       - name: deploy-website
         run: make BUILD_IN_CONTAINER=false web-deploy
