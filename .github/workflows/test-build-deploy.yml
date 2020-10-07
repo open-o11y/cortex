@@ -244,7 +244,7 @@ jobs:
           tar -xz -C /tmp -f /tmp/docker-$VER.tgz
           mv /tmp/docker/* /usr/bin
       - name: Load cache from Build job
-          uses: actions/download-artifact@v2
+        uses: actions/download-artifact@v2
           with:
             name: Docker Images
       - name: extract images from cache
