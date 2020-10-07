@@ -2,7 +2,7 @@ name: ci
 # TODO: Add Tag Filters For Release Candidate and Limit Trigger to Master Branch.
 on:
   push:
-    branches: [master]
+    branches: [testbranch]
     tags:
       - v[0-9]+.[0-9]+.[0-9]+**
   pull_request:
@@ -205,7 +205,7 @@ jobs:
             make BUILD_IMAGE=quay.io/cortexproject/build-image:update-golang-1.14.9-eb0c8d4d2 TTY='' configs-integration-test
   deploy_website:
     needs: build # actual line: [build, test] but keeping at [build] for rapid testing
-    if: github.ref == 'refs/heads/master'
+    if: github.ref == 'refs/heads/testbranch'
     runs-on: ubuntu-latest
     container:
       image: quay.io/cortexproject/build-image:update-golang-1.14.9-eb0c8d4d2
@@ -225,7 +225,7 @@ jobs:
         run: make BUILD_IN_CONTAINER=false web-deploy
   deploy:
     needs: build # actual line: [build, test, lint, integration, integration-configs-db] but keeping at [build] for rapid testing
-    if: github.ref == 'refs/heads/master'
+    if: github.ref == 'refs/heads/testbranch'
     runs-on: ubuntu-latest
     container:
       image: quay.io/cortexproject/build-image:update-golang-1.14.9-eb0c8d4d2
