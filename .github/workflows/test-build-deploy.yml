@@ -245,8 +245,8 @@ jobs:
           mv /tmp/docker/* /usr/bin
       - name: Load cache from Build job
         uses: actions/download-artifact@v2
-          with:
-            name: Docker Images
+        with:
+          name: Docker Images
       - name: extract images from cache
         run: tar -xzvf images.tar.gz -C /
       - name: Load Images
