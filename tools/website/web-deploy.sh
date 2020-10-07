@@ -39,7 +39,8 @@ git add -A
 git commit --allow-empty -m "Deploy to GitHub pages"
 echo "Changes committed"
 # and push, but send any output to /dev/null to hide anything sensitive
-git push --force --quiet origin gh-pages > /dev/null 2>&1
+#git push --force --quiet origin gh-pages > /dev/null 2>&1
+git push --force origin gh-pages
 echo "Changes pushed"
 # go back to where we started and remove the gh-pages git repo we made and used
 # for deployment
