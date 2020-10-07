@@ -217,8 +217,8 @@ jobs:
           ln -s $GITHUB_WORKSPACE/* /go/src/github.com/cortexproject/cortex
       - name: download website from build job
         uses: actions/download-artifact@v2
-          with:
-            name: website public
-            path: website/public
+        with:
+          name: website public
+          path: website/public
       - name: deploy-website
         run: make BUILD_IN_CONTAINER=false web-deploy
