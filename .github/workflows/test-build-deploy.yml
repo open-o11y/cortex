@@ -80,6 +80,10 @@ jobs:
           make BUILD_IN_CONTAINER=false web-build
       - uses: actions/upload-artifact@v2
         with:
+          name: website public
+          path: website/public/
+      - uses: actions/upload-artifact@v2
+        with:
           name: Frontend Protobuf
           path: pkg/querier/frontend/frontend.pb.go
       - uses: actions/upload-artifact@v2
