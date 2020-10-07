@@ -4,8 +4,7 @@ on:
   push:
     branches: [master]
     tags:
-      - v[0-9]+(.[0-9]+)(.[0-9]+)(-.+)
-      - v[0-9]+(.[0-9]+)(.[0-9]+)!(-.)*
+      - v[0-9]+.[0-9]+.[0-9]+**
   pull_request:
 jobs:
   lint:
@@ -192,8 +191,6 @@ jobs:
             name: Docker Images
         - name: extract images from cache
           run: tar -xzvf images.tar.gz -C /
-        - run: echo "$(ls -al)"
-        - run: echo "$(ls -al /tmp/images/)"
         - name: Install Docker Client
           run: |
             set -x
@@ -208,6 +205,7 @@ jobs:
             make BUILD_IMAGE=quay.io/cortexproject/build-image:update-golang-1.14.9-eb0c8d4d2 TTY='' configs-integration-test
   deploy_website:
     needs: build # actual line: [build, test] but keeping at [build] for rapid testing
+    if: github.ref == 'refs/heads/master'
     runs-on: ubuntu-latest
     container:
       image: quay.io/cortexproject/build-image:update-golang-1.14.9-eb0c8d4d2
@@ -225,3 +223,47 @@ jobs:
           path: website/public
       - name: deploy-website
         run: make BUILD_IN_CONTAINER=false web-deploy
+  deploy:
+    needs: build # actual line: [build, test, lint, integration, integration-configs-db] but keeping at [build] for rapid testing
+    if: github.ref == 'refs/heads/master'
+    runs-on: ubuntu-latest
+    container:
+      image: quay.io/cortexproject/build-image:update-golang-1.14.9-eb0c8d4d2
+    steps:
+      - name: Checkout Repo
+        uses: actions/checkout@v1
+      - name: Sym link expected path to github workspace
+        run: |
+          mkdir -p /go/src/github.com/cortexproject/cortex
+          ln -s $GITHUB_WORKSPACE/* /go/src/github.com/cortexproject/cortex
+      - name: Install Docker Client
+        run: |
+          set -x
+          VER="17.03.0-ce"
+          curl -L -o /tmp/docker-$VER.tgz https://download.docker.com/linux/static/stable/x86_64/docker-$VER.tgz
+          tar -xz -C /tmp -f /tmp/docker-$VER.tgz
+          mv /tmp/docker/* /usr/bin
+      - name: Load cache from Build job
+          uses: actions/download-artifact@v2
+          with:
+            name: Docker Images
+      - name: extract images from cache
+        run: tar -xzvf images.tar.gz -C /
+      - name: Load Images
+        run: ln -s /tmp/images ./docker-images; make BUILD_IN_CONTAINER=false load-images
+      - name: Deploy
+        run: |
+          if [ -n "$DOCKER_REGISTRY_PASSWORD" ]; then
+            docker login -u "$DOCKER_REGISTRY_USER" -p "$DOCKER_REGISTRY_PASSWORD"
+          fi
+          if [ -n "$QUAY_PASSWORD" ]; then
+            docker login -u "$QUAY_USER" -p "$QUAY_PASSWORD" quay.io;
+          fi
+          IMAGE_TAG=$CIRCLE_TAG ./push-images $NOQUAY
+        env:
+          DOCKER_REGISTRY_PASSWORD: ${{ secrets.DOCKER_REGISTRY_PASSWORD }}
+          DOCKER_REGISTRY_USER: ${{secrets.DOCKER_REGISTRY_USER}}
+          QUAY_PASSWORD: ${{secrets.QUAY_PASSWORD}}
+          QUAY_USER: ${{secrest.QUAY_USER}}
+          CIRCLE_TAG:
+          NOQUAY:
