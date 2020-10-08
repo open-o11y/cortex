@@ -137,11 +137,11 @@ jobs:
           cd -
       - name: Checkout Repo
         uses: actions/checkout@v1
-      - name: Download Docker Images Artifacts
+      - name: Restore Docker Images
         uses: actions/download-artifact@v2
         with:
           name: Docker Images
-      - name: Unzip Docker Images
+      - name: Uncompress Docker Images
         run: tar -zxvf images.tar.gz -C /
       - name: Load Docker Images
         run: |
