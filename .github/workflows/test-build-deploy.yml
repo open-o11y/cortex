@@ -108,9 +108,9 @@ jobs:
           mkdir /tmp/images
           ln -s /tmp/images ./docker-images
           make BUILD_IN_CONTAINER=false save-images
-      - name: Zip Images
+      - name: Zip Docker Images
         run: tar -zcvf images.tar.gz /tmp/images
-      - name: Upload Images Artifact
+      - name: Upload Docker Images Artifact
         uses: actions/upload-artifact@v2
         with:
           name: Docker Images
@@ -137,17 +137,17 @@ jobs:
           cd -
       - name: Checkout Repo
         uses: actions/checkout@v1
-      - name: Restore Images
+      - name: Download Docker Images Artifacts
         uses: actions/download-artifact@v2
         with:
-          name: Images
-      - name: Uncompress Images
+          name: Docker Images
+      - name: Unzip Docker Images
         run: tar -zxvf images.tar.gz -C /
-      - name: Load Images
+      - name: Load Docker Images
         run: |
           ln -s /tmp/images ./docker-images
           make BUILD_IN_CONTAINER=false load-images
-      - name: Preload Docker Images
+      - name: Preload Images
         # We download docker images used by integration tests so that all images are available
         # locally and the download time doesn't account in the test execution time, which is subject
         # to a timeout
@@ -189,11 +189,11 @@ jobs:
           curl -L -o /tmp/docker-$VER.tgz https://download.docker.com/linux/static/stable/x86_64/docker-$VER.tgz
           tar -xz -C /tmp -f /tmp/docker-$VER.tgz
           sudo mv /tmp/docker/* /usr/bin
-      - name: Download Images Artifact
+      - name: Download Docker Images Artifact
         uses: actions/download-artifact@v2
         with:
           name: Docker Images
-      - name: Unzip Images
+      - name: Unzip Docker Images
         run: tar -xzvf images.tar.gz -C /
       - name: Run Integration Configs Tests
         run: |
