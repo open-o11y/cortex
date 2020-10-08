@@ -1,7 +1,7 @@
 # Changelog
 
 ## master / unreleased
-
+* [CHANGE] Added GitHub Actions workflow equivalent to existing CircleCI one for migration purposes.
 * [CHANGE] Blocks storage: update the default HTTP configuration values for the S3 client to the upstream Thanos default values. #3244
   - `-blocks-storage.s3.http.idle-conn-timeout` is set 90 seconds.
   - `-blocks-storage.s3.http.response-header-timeout` is set to 2 minutes.
