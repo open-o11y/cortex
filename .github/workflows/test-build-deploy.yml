@@ -116,8 +116,6 @@ jobs:
           name: Docker Images
           path: ./images.tar.gz
 
-  # DOES NOT WORK DUE TO MISSING IMAGE_PREFIX
-  # TODO: Add IMAGE_PREFIX secret or find workaround
   integration:
     needs: build
     runs-on: ubuntu-16.04
@@ -167,13 +165,17 @@ jobs:
           docker pull memcached:1.6.1
           docker pull bouncestorage/swift-aio:55ba4331
       - name: Integration Tests
-        run: | # FAILS HERE
+        run: |
+          if [[ -z "${IMAGE_PREFIX}" ]]; then
+            export IMAGE_PREFIX="cortexproject/"
+          fi
           export CORTEX_IMAGE_PREFIX="${IMAGE_PREFIX:-quay.io/cortexproject/}"
-          export CORTEX_IMAGE="${CORTEX_IMAGE_PREFIX}cortex:${CIRCLE_TAG:-$(./tools/image-tag)}"
+          export CORTEX_IMAGE="${CORTEX_IMAGE_PREFIX}cortex:${GITHUB_REF:-$(./tools/image-tag)}"
           export CORTEX_CHECKOUT_DIR="/go/src/github.com/cortexproject/cortex"
           echo "Running integration tests with image: $CORTEX_IMAGE"
           go test -tags=requires_docker -timeout 1200s -v -count=1 ./integration/...
-
+        env:
+          IMAGE_PREFIX: ${{ secrets.IMAGE_PREFIX }}
   integration-configs-db:
     needs: build
     runs-on: ubuntu-16.04
