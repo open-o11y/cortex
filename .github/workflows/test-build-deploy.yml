@@ -228,7 +228,7 @@ jobs:
           git config --global user.name "ci"
           git config --global user.email "ci@cortexmetrics.io"
           git init && git remote add --fetch github "https://$GITHUB_ACTOR:$GITHUB_TOKEN@github.com/$GITHUB_REPOSITORY.git"
-          git checkout gh-pages && git rm -rf
+          git checkout gh-pages && git rm -rf .
           cp -a "../website/public/." .
           echo "cortexmetrics.io" > CNAME
           git commit --allow-empty -am "Deploy to GitHub pages"
