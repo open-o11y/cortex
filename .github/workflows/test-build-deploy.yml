@@ -158,7 +158,6 @@ jobs:
         uses: actions/download-artifact@v2
         with:
           name: Docker Images
-      - run: echo "$(ls -al)"
       - name: Uncompress Docker Images
         run: tar -zxvf images.tar.gz -C /
       - name: Load Docker Images
@@ -181,15 +180,15 @@ jobs:
           docker pull shopify/bigtable-emulator:0.1.0
           docker pull rinscy/cassandra:3.11.0
           docker pull memcached:1.6.1
-          docker pull cortexproject/cortex:master-4e27f11a0
+          docker pull quay.io/cortexproject/cortex:v1.4.0
           docker pull bouncestorage/swift-aio:55ba4331
       - name: Integration Tests
         run: |
           if [[ -z "${IMAGE_PREFIX}" ]]; then
             export IMAGE_PREFIX="cortexproject/"
           fi
-          export CORTEX_IMAGE_PREFIX="${IMAGE_PREFIX:-quay.io/cortexproject/}"
-          export CORTEX_IMAGE="${CORTEX_IMAGE_PREFIX}cortex:master-4e27f11a0
+          export CORTEX_IMAGE_PREFIX="cortexproject/:-quay.io/cortexproject/}"
+          export CORTEX_IMAGE="${CORTEX_IMAGE_PREFIX}cortex
           export CORTEX_CHECKOUT_DIR="/go/src/github.com/cortexproject/cortex"
           echo "Running integration tests with image: $CORTEX_IMAGE"
           go test -tags=requires_docker -timeout 1200s -v -count=1 ./integration/...
