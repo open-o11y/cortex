@@ -223,8 +223,8 @@ jobs:
       - name: Deploy Website
         run: |
           mkdir gh-pages-branch && cd gh-pages-branch
-          git config --global user.name "ci"
-          git config --global user.email "ci@cortexmetrics.io"
+          git config --global user.name "$GITHUB_ACTOR"
+          git config --global user.email "${$GITHUB_ACTOR}@cortexmetrics.io"
           git init && git remote add --fetch origin "https://$GITHUB_ACTOR:$GITHUB_TOKEN@github.com/$GITHUB_REPOSITORY"
           git checkout gh-pages && git rm -rf .
           cp -a "../website/public/." .
