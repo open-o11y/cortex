@@ -232,8 +232,6 @@ jobs:
           git commit --allow-empty -am "Deploy to GitHub pages"
           git push --force --quiet origin gh-pages
           cd .. && rm -rf gh-pages-branch
-      # - name: deploy-website
-      #   run: make BUILD_IN_CONTAINER=false web-deploy # FAILS HERE
 
   # deploy:
   #   needs: [build, test, lint, integration, integration-configs-db]
