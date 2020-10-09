@@ -5,9 +5,6 @@ on:
     tags:
       - v[0-9]+.[0-9]+.[0-9]+** # Tag filters not as strict due to different regex system on Github Actions
   pull_request:
-  release:
-    tags:
-      - v[0-9]+.[0-9]+.[0-9]+** # Tag filters not as strict due to different regex system on Github Actions
 jobs:
   lint:
     runs-on: ubuntu-latest
@@ -63,16 +60,6 @@ jobs:
     steps:
       - name: Checkout Repo
         uses: actions/checkout@v1
-      - run: echo "${{ github.event.pull_request }}" # remove
-      - name: Dump GitHub context  # remove
-        env:
-          GITHUB_CONTEXT: ${{ toJson(github) }} # remove
-        run: echo "$GITHUB_CONTEXT" # remove
-      - run: echo "$(git describe --tag)" # remove
-      - name: spit out tag # remove
-        run: echo "$IMAGE_TAG" # remove
-        env: # remove
-          IMAGE_TAG: ${{ github.event.push.tag_name }} # remove
       - name: Install Docker Client
         run: |
           set -x
@@ -121,6 +108,9 @@ jobs:
           mkdir /tmp/images
           ln -s /tmp/images ./docker-images
           make BUILD_IN_CONTAINER=false save-images
+      - run: echo "ls -al /tmp/images"
+      - name: tools image tag
+        run: echo "$(./tools/image-tag)"
       - name: Zip Images
         run: tar -zcvf images.tar.gz /tmp/images
       - name: Upload Images Artifact
@@ -164,6 +154,9 @@ jobs:
         run: |
           ln -s /tmp/images ./docker-images
           make BUILD_IN_CONTAINER=false load-images
+      - run: echo "ls -al /tmp/images"
+      - name: tools image tag
+        run: echo "$(./tools/image-tag)"
       - name: Preload Images
         # We download docker images used by integration tests so that all images are available
         # locally and the download time doesn't account in the test execution time, which is subject
@@ -180,18 +173,20 @@ jobs:
           docker pull shopify/bigtable-emulator:0.1.0
           docker pull rinscy/cassandra:3.11.0
           docker pull memcached:1.6.1
-          docker pull quay.io/cortexproject/cortex:v1.4.0
           docker pull bouncestorage/swift-aio:55ba4331
       - name: Integration Tests
         run: |
-          export CORTEX_IMAGE_PREFIX="cortexproject/:-quay.io/cortexproject/}"
-          export CORTEX_IMAGE="${CORTEX_IMAGE_PREFIX}cortex
+          if [[ -z "${IMAGE_PREFIX}" ]]; then
+            export IMAGE_PREFIX="cortexproject/"
+          fi
+          export TAG="$(git describe --tag)"
+          export CORTEX_IMAGE_PREFIX="${IMAGE_PREFIX:-quay.io/cortexproject/}"
+          export CORTEX_IMAGE="${CORTEX_IMAGE_PREFIX}cortex:${TAG:-$(./tools/image-tag)}"
           export CORTEX_CHECKOUT_DIR="/go/src/github.com/cortexproject/cortex"
           echo "Running integration tests with image: $CORTEX_IMAGE"
           go test -tags=requires_docker -timeout 1200s -v -count=1 ./integration/...
         env:
           IMAGE_PREFIX: ${{ secrets.IMAGE_PREFIX }}
-          IMAGE_TAG: ${{ github.event.push.tag_name }}
   integration-configs-db:
     needs: build
     runs-on: ubuntu-16.04
