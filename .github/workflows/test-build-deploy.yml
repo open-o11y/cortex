@@ -230,9 +230,9 @@ jobs:
           cp -a "../website/public/." .
           echo "cortexmetrics.io" > CNAME
           git commit --allow-empty -am "Deploy to GitHub pages"
-            git push --force "https://${GITHUB_TOKEN}:@github.com/$GITHUB_REPOSITORY" --set-upstream gh-pages 1>/dev/null 2>&1
+            git push --force "https://${GITHUB_TOKEN}:@github.com/$GITHUB_REPOSITORY" --set-upstream gh-pages
           cd .. && rm -rf gh-pages-branch
-        env:
+        env: # 1>/dev/null 2>&1
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   # deploy:
