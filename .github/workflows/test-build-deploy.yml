@@ -184,9 +184,6 @@ jobs:
           docker pull bouncestorage/swift-aio:55ba4331
       - name: Integration Tests
         run: |
-          if [[ -z "${IMAGE_PREFIX}" ]]; then
-            export IMAGE_PREFIX="cortexproject/"
-          fi
           export CORTEX_IMAGE_PREFIX="cortexproject/:-quay.io/cortexproject/}"
           export CORTEX_IMAGE="${CORTEX_IMAGE_PREFIX}cortex
           export CORTEX_CHECKOUT_DIR="/go/src/github.com/cortexproject/cortex"
