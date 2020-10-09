@@ -222,8 +222,22 @@ jobs:
         with:
           name: website public
           path: website/public
-      - name: deploy-website
-        run: make BUILD_IN_CONTAINER=false web-deploy # FAILS HERE
+      - name: Deploy Website
+        run: |
+          mkdir gh-pages-branch && cd gh-pages-branch
+          git config --global user.name "ci"
+          git config --global user.email "ci@cortexmetrics.io"
+          git init && git remote add --fetch github "https://$GITHUB_ACTOR:$GITHUB_TOKEN@github.com/$GITHUB_REPOSITORY.git"
+          git rev-parse --verify origin/gh-pages > /dev/null 2>&1
+          git checkout gh-pages && git rm -rf
+          cp -a "../website/public/." .
+          echo "cortexmetrics.io" > CNAME
+          git add -A
+          git commit --allow-empty -m "Deploy to GitHub pages"
+          git push --force --quiet origin gh-pages
+          cd .. && rm -rf gh-pages-branch
+      # - name: deploy-website
+      #   run: make BUILD_IN_CONTAINER=false web-deploy # FAILS HERE
 
   # deploy:
   #   needs: [build, test, lint, integration, integration-configs-db]
@@ -267,5 +281,5 @@ jobs:
   #         DOCKER_REGISTRY_USER: ${{secrets.DOCKER_REGISTRY_USER}}
   #         QUAY_PASSWORD: ${{secrets.QUAY_PASSWORD}}
   #         QUAY_USER: ${{secrets.QUAY_USER}}
-  #         GIT_TAG: ${{secrets.GIT_TAG}} # Hardcoded for now 
+  #         GIT_TAG: ${{github.event.release.tag_name}} 
   #         NOQUAY: ${{secrets.NOQUAY}}
