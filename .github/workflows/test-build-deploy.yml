@@ -158,9 +158,6 @@ jobs:
         run: |
           ln -s /tmp/images ./docker-images
           make BUILD_IN_CONTAINER=false load-images
-      - run: echo "$(ls -al /tmp/images)"
-      - name: tools image tag
-        run: echo "$(./tools/image-tag)"
       - name: Preload Images
         # We download docker images used by integration tests so that all images are available
         # locally and the download time doesn't account in the test execution time, which is subject
