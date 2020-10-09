@@ -201,8 +201,6 @@ jobs:
   #         MIGRATIONS_DIR=$(pwd)/cmd/cortex/migrations
   #           make BUILD_IMAGE=quay.io/cortexproject/build-image:update-golang-1.14.9-eb0c8d4d2 TTY='' configs-integration-test
 
-  # DOES NOT WORK DUE TO MISSING SSH KEY
-  # TODO: Add ssh key once acquired
   deploy_website:
     needs: [build]
     # needs: [build, test]
@@ -227,7 +225,7 @@ jobs:
           mkdir gh-pages-branch && cd gh-pages-branch
           git config --global user.name "ci"
           git config --global user.email "ci@cortexmetrics.io"
-          git init && git remote add --fetch origin "https://$GITHUB_ACTOR:$GITHUB_TOKEN@github.com/$GITHUB_REPOSITORY.git"
+          git init && git remote add --fetch origin "https://$GITHUB_ACTOR:$GITHUB_TOKEN@github.com/$GITHUB_REPOSITORY"
           git checkout gh-pages && git rm -rf .
           cp -a "../website/public/." .
           echo "cortexmetrics.io" > CNAME
