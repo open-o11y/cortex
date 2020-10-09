@@ -108,7 +108,7 @@ jobs:
           mkdir /tmp/images
           ln -s /tmp/images ./docker-images
           make BUILD_IN_CONTAINER=false save-images
-      - run: echo "ls -al /tmp/images"
+      - run: echo "$(ls -al /tmp/images)"
       - name: tools image tag
         run: echo "$(./tools/image-tag)"
       - name: Zip Images
@@ -154,7 +154,7 @@ jobs:
         run: |
           ln -s /tmp/images ./docker-images
           make BUILD_IN_CONTAINER=false load-images
-      - run: echo "ls -al /tmp/images"
+      - run: echo "$(ls -al /tmp/images)"
       - name: tools image tag
         run: echo "$(./tools/image-tag)"
       - name: Preload Images
