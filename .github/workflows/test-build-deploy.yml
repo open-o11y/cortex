@@ -5,6 +5,9 @@ on:
     tags:
       - v[0-9]+.[0-9]+.[0-9]+** # Tag filters not as strict due to different regex system on Github Actions
   pull_request:
+  release:
+    tags:
+      - v[0-9]+.[0-9]+.[0-9]+** # Tag filters not as strict due to different regex system on Github Actions
 jobs:
   lint:
     runs-on: ubuntu-latest
@@ -179,7 +182,6 @@ jobs:
           if [[ -z "${IMAGE_PREFIX}" ]]; then
             export IMAGE_PREFIX="cortexproject/"
           fi
-          export TAG="$(git describe --tag)"
           export CORTEX_IMAGE_PREFIX="${IMAGE_PREFIX:-quay.io/cortexproject/}"
           export CORTEX_IMAGE="${CORTEX_IMAGE_PREFIX}cortex:${TAG:-$(./tools/image-tag)}"
           export CORTEX_CHECKOUT_DIR="/go/src/github.com/cortexproject/cortex"
@@ -187,6 +189,7 @@ jobs:
           go test -tags=requires_docker -timeout 1200s -v -count=1 ./integration/...
         env:
           IMAGE_PREFIX: ${{ secrets.IMAGE_PREFIX }}
+          TAG: ${{ github.event.release.tag_name }}
   integration-configs-db:
     needs: build
     runs-on: ubuntu-16.04
