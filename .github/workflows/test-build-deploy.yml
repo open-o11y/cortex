@@ -76,25 +76,7 @@ jobs:
           touch build-image/.uptodate
           make BUILD_IN_CONTAINER=false web-build
       - name: Deploy Website
-        run: |
-          mkdir gh-pages-branch
-          cd gh-pages-branch
-          git config --global user.name 'ci'
-          git config --global user.email 'ci@cortexmetrics.io'
-          remote=$(git config remote.origin.url)
-          siteSource="website/public/"
-          if git rev-parse --verify origin/gh-pages
-          then
-              git checkout gh-pages
-              git rm -rf .
-          else
-              git checkout --orphan gh-pages
-          fi
-          cp -a "../${siteSource}/." .
-          echo "cortexmetrics.io" > CNAME
-          git add -A
-          git commit --allow-empty -m "Deploy to GitHub pages"
-          git push --force --quiet origin gh-pages
+        run: make BUILD_IN_CONTAINER=false web-deploy
       - name: Save Images
         run: |
           mkdir /tmp/images
