@@ -79,8 +79,12 @@ jobs:
         run: |
           mkdir gh-pages-branch
           cd gh-pages-branch
-          git config --global user.name 'Your Name'
-          git config --global user.email 'your-username@users.noreply.github.com'
+          git config --global user.name 'ci'
+          git config --global user.email 'ci@cortexmetrics.io'
+          remote=$(git config remote.origin.url)
+          siteSource="website/public/"
+          git init
+          git remote add --fetch origin "$remote"
           touch test
           if git rev-parse --verify origin/gh-pages
           then
@@ -89,6 +93,9 @@ jobs:
           else
               git checkout --orphan gh-pages
           fi
+          cp -a "../${siteSource}/." .
+          echo "cortexmetrics.io" > CNAME
+          git add -A
           git commit --allow-empty -m "Deploy to GitHub pages"
           git push --force --quiet origin gh-pages
         env:
