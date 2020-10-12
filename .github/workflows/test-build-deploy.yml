@@ -201,81 +201,81 @@ jobs:
   #         MIGRATIONS_DIR=$(pwd)/cmd/cortex/migrations
   #           make BUILD_IMAGE=quay.io/cortexproject/build-image:update-golang-1.14.9-eb0c8d4d2 TTY='' configs-integration-test
 
-  deploy_website:
-    needs: [build]
-    # needs: [build, test]
-    # if: github.ref == 'refs/heads/master' && github.repository == 'cortexproject/cortex'
-    runs-on: ubuntu-latest
-    container:
-      image: quay.io/cortexproject/build-image:update-golang-1.14.9-eb0c8d4d2
-    steps:
-      - name: Checkout Repo
-        uses: actions/checkout@v1
-      - name: Sym Link Expected Path to Workspace
-        run: |
-          mkdir -p /go/src/github.com/cortexproject/cortex
-          ln -s $GITHUB_WORKSPACE/* /go/src/github.com/cortexproject/cortex
-      - name: Download Website Artifact
-        uses: actions/download-artifact@v2
-        with:
-          name: website public
-          path: website/public
-      - name: Deploy Website
-        run: |
-          mkdir gh-pages-branch && cd gh-pages-branch
-          git config --global user.name $GITHUB_ACTOR
-          git config --global user.email "${GITHUB_ACTOR}@cortexmetrics.io}"
-          git init && git remote add --fetch origin "https://$GITHUB_ACTOR:$GITHUB_TOKEN@github.com/$GITHUB_REPOSITORY"
-          git checkout gh-pages && git rm -rf .
-          cp -a "../website/public/." .
-          echo "cortexmetrics.io" > CNAME
-          git commit --allow-empty -am "Deploy to GitHub pages"
-            git push --force "https://${GITHUB_TOKEN}:@github.com/$GITHUB_REPOSITORY" --set-upstream gh-pages
-          cd .. && rm -rf gh-pages-branch
-        env: # 1>/dev/null 2>&1
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-  # deploy:
-  #   needs: [build, test, lint, integration, integration-configs-db]
-  #   if: github.ref == 'refs/heads/master' && github.repository == 'cortexproject/cortex'
+  # deploy_website:
+  #   needs: [build]
+  #   # needs: [build, test]
+  #   # if: github.ref == 'refs/heads/master' && github.repository == 'cortexproject/cortex'
   #   runs-on: ubuntu-latest
   #   container:
   #     image: quay.io/cortexproject/build-image:update-golang-1.14.9-eb0c8d4d2
   #   steps:
   #     - name: Checkout Repo
   #       uses: actions/checkout@v1
-  #     - name: Sym link expected path to github workspace
+  #     - name: Sym Link Expected Path to Workspace
   #       run: |
   #         mkdir -p /go/src/github.com/cortexproject/cortex
   #         ln -s $GITHUB_WORKSPACE/* /go/src/github.com/cortexproject/cortex
-  #     - name: Install Docker Client
-  #       run: |
-  #         set -x
-  #         VER="17.03.0-ce"
-  #         curl -L -o /tmp/docker-$VER.tgz https://download.docker.com/linux/static/stable/x86_64/docker-$VER.tgz
-  #         tar -xz -C /tmp -f /tmp/docker-$VER.tgz
-  #         mv /tmp/docker/* /usr/bin
-  #     - name: Load cache from Build job
+  #     - name: Download Website Artifact
   #       uses: actions/download-artifact@v2
   #       with:
-  #         name: Docker Images
-  #     - name: extract images from cache
-  #       run: tar -xzvf images.tar.gz -C /
-  #     - name: Load Images
-  #       run: ln -s /tmp/images ./docker-images; make BUILD_IN_CONTAINER=false load-images
-  #     - name: Deploy
+  #         name: website public
+  #         path: website/public
+  #     - name: Deploy Website
   #       run: |
-  #         if [ -n "$DOCKER_REGISTRY_PASSWORD" ]; then
-  #           docker login -u "$DOCKER_REGISTRY_USER" -p "$DOCKER_REGISTRY_PASSWORD"
-  #         fi
-  #         if [ -n "$QUAY_PASSWORD" ]; then
-  #           docker login -u "$QUAY_USER" -p "$QUAY_PASSWORD" quay.io;
-  #         fi
-  #         IMAGE_TAG=$GIT_TAG ./push-images $NOQUAY
-  #       env:
-  #         DOCKER_REGISTRY_PASSWORD: ${{ secrets.DOCKER_REGISTRY_PASSWORD }}
-  #         DOCKER_REGISTRY_USER: ${{secrets.DOCKER_REGISTRY_USER}}
-  #         QUAY_PASSWORD: ${{secrets.QUAY_PASSWORD}}
-  #         QUAY_USER: ${{secrets.QUAY_USER}}
-  #         GIT_TAG: ${{github.event.release.tag_name}} 
-  #         NOQUAY: ${{secrets.NOQUAY}}
+  #         mkdir gh-pages-branch && cd gh-pages-branch
+  #         git config --global user.name $GITHUB_ACTOR
+  #         git config --global user.email "${GITHUB_ACTOR}@cortexmetrics.io}"
+  #         git init && git remote add --fetch origin "https://$GITHUB_ACTOR:$GITHUB_TOKEN@github.com/$GITHUB_REPOSITORY"
+  #         git checkout gh-pages && git rm -rf .
+  #         cp -a "../website/public/." .
+  #         echo "cortexmetrics.io" > CNAME
+  #         git commit --allow-empty -am "Deploy to GitHub pages"
+  #           git push --force "https://${GITHUB_TOKEN}:@github.com/$GITHUB_REPOSITORY" --set-upstream gh-pages
+  #         cd .. && rm -rf gh-pages-branch
+  #       env: # 1>/dev/null 2>&1
+  #         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  deploy:
+    needs: [build, test, lint, integration, integration-configs-db]
+    if: github.ref == 'refs/heads/master' && github.repository == 'cortexproject/cortex'
+    runs-on: ubuntu-latest
+    container:
+      image: quay.io/cortexproject/build-image:update-golang-1.14.9-eb0c8d4d2
+    steps:
+      - name: Checkout Repo
+        uses: actions/checkout@v1
+      - name: Sym link expected path to github workspace
+        run: |
+          mkdir -p /go/src/github.com/cortexproject/cortex
+          ln -s $GITHUB_WORKSPACE/* /go/src/github.com/cortexproject/cortex
+      - name: Install Docker Client
+        run: |
+          set -x
+          VER="17.03.0-ce"
+          curl -L -o /tmp/docker-$VER.tgz https://download.docker.com/linux/static/stable/x86_64/docker-$VER.tgz
+          tar -xz -C /tmp -f /tmp/docker-$VER.tgz
+          mv /tmp/docker/* /usr/bin
+      - name: Load cache from Build job
+        uses: actions/download-artifact@v2
+        with:
+          name: Docker Images
+      - name: extract images from cache
+        run: tar -xzvf images.tar.gz -C /
+      - name: Load Images
+        run: ln -s /tmp/images ./docker-images; make BUILD_IN_CONTAINER=false load-images
+      - name: Deploy
+        run: |
+          if [ -n "$DOCKER_REGISTRY_PASSWORD" ]; then
+            docker login -u "$DOCKER_REGISTRY_USER" -p "$DOCKER_REGISTRY_PASSWORD"
+          fi
+          if [ -n "$QUAY_PASSWORD" ]; then
+            docker login -u "$QUAY_USER" -p "$QUAY_PASSWORD" quay.io;
+          fi
+          IMAGE_TAG=$GIT_TAG ./push-images $NOQUAY
+        env:
+          DOCKER_REGISTRY_PASSWORD: ${{ secrets.DOCKER_REGISTRY_PASSWORD }}
+          DOCKER_REGISTRY_USER: ${{secrets.DOCKER_REGISTRY_USER}}
+          QUAY_PASSWORD: ${{secrets.QUAY_PASSWORD}}
+          QUAY_USER: ${{secrets.QUAY_USER}}
+          GIT_TAG: ${{github.event.release.tag_name}} 
+          NOQUAY: ${{secrets.NOQUAY}}
