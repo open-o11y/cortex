@@ -80,9 +80,15 @@ jobs:
           git config --global user.name 'Your Name'
           git config --global user.email 'your-username@users.noreply.github.com'
           touch test
-          git checkout gh-pages
-          git commit -am "Automated report"
-          git push
+          if git rev-parse --verify origin/gh-pages > /dev/null 2>&1
+          then
+              git checkout gh-pages
+              git rm -rf .
+          else
+              git checkout --orphan gh-pages
+          fi
+          git commit --allow-empty -m "Deploy to GitHub pages"
+          git push origin gh-pages
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Save Images
