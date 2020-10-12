@@ -80,7 +80,7 @@ jobs:
           git config --global user.name 'Your Name'
           git config --global user.email 'your-username@users.noreply.github.com'
           touch test
-          if git rev-parse --verify origin/gh-pages > /dev/null 2>&1
+          if git rev-parse --verify origin/gh-pages
           then
               git checkout gh-pages
               git rm -rf .
@@ -88,7 +88,7 @@ jobs:
               git checkout --orphan gh-pages
           fi
           git commit --allow-empty -m "Deploy to GitHub pages"
-          git push origin gh-pages
+          git push --force --quiet origin gh-pages
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Save Images
