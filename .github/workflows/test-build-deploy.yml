@@ -77,6 +77,8 @@ jobs:
           make BUILD_IN_CONTAINER=false web-build
       - name: Deploy Website
         run: |
+          mkdir gh-pages-branch
+          cd gh-pages-branch
           git config --global user.name 'Your Name'
           git config --global user.email 'your-username@users.noreply.github.com'
           touch test
