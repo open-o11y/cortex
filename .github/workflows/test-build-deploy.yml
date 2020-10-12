@@ -77,15 +77,12 @@ jobs:
           make BUILD_IN_CONTAINER=false web-build
       - name: Deploy Website
         run: |
-          mkdir gh-pages-branch && cd gh-pages-branch
-          git config user.name "test"
-          git config user.email "test@test.com"
-          git init && git remote add --fetch origin "https://$GITHUB_ACTOR:$GITHUB_TOKEN@github.com/$GITHUB_REPOSITORY"
-          git checkout gh-pages && git rm -rf .
-          cp -a "../website/public/." .
-          echo "cortexmetrics.io" > CNAME
-          git commit --allow-empty -am "Deploy to GitHub pages"
-          git push --force "https://${GITHUB_TOKEN}:@github.com/$GITHUB_REPOSITORY" --set-upstream gh-pages
+          git config --global user.name 'Your Name'
+          git config --global user.email 'your-username@users.noreply.github.com'
+          touch test
+          git checkout gh-pages
+          git commit -am "Automated report"
+          git push
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Save Images
