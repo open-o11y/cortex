@@ -16,7 +16,7 @@ jobs:
       - name: Sym Link Expected Path to Workspace
         run: |
           mkdir -p /go/src/github.com/cortexproject/cortex
-          ln -s $GITHUB_WORKSPACE/* /go/src/github.com/cortexproject/cortex
+          ln -s $GITHUB_WORKSPACE/ /go/src/github.com/cortexproject/cortex
       - name: Lint
         run: make BUILD_IN_CONTAINER=false lint
       - name: Check Vendor Directory
@@ -45,7 +45,7 @@ jobs:
       - name: Sym Link Expected Path to Workspace
         run: |
           mkdir -p /go/src/github.com/cortexproject/cortex
-          ln -s $GITHUB_WORKSPACE/* /go/src/github.com/cortexproject/cortex
+          ln -s $GITHUB_WORKSPACE/ /go/src/github.com/cortexproject/cortex
       - name: Run Tests
         run: CASSANDRA_TEST_ADDRESSES=cassandra:9042 make BUILD_IN_CONTAINER=false test
 
@@ -66,7 +66,7 @@ jobs:
       - name: Sym Link Expected Path to Workspace
         run: |
           mkdir -p /go/src/github.com/cortexproject/cortex
-          ln -s $GITHUB_WORKSPACE/* /go/src/github.com/cortexproject/cortex
+          ln -s $GITHUB_WORKSPACE/ /go/src/github.com/cortexproject/cortex
       - name: Build Image
         run: |
           touch build-image/.uptodate
