@@ -76,7 +76,7 @@ jobs:
           touch build-image/.uptodate
           make BUILD_IN_CONTAINER=false web-build
       - name: Deploy Website
-        run: | # https://$GITHUB_ACTOR:$GITHUB_TOKEN@github.com/$GITHUB_REPOSITORY" "https://${GITHUB_TOKEN}:@github.com/$GITHUB_REPOSITORY"
+        run: | #https://$GITHUB_ACTOR:$GITHUB_TOKEN@github.com/$GITHUB_REPOSITORY" "https://${GITHUB_TOKEN}:@github.com/$GITHUB_REPOSITORY"
           mkdir gh-pages-branch && cd gh-pages-branch
           git config --global user.name $GITHUB_ACTOR
           git config --global user.email "${GITHUB_ACTOR}@cortexmetrics.io}"
