@@ -236,7 +236,8 @@ jobs:
   #         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   deploy:
-    needs: [build, test, lint, integration, integration-configs-db]
+    needs: [build]
+    # needs: [build, test, lint, integration, integration-configs-db]
     if: github.ref == 'refs/heads/master' && github.repository == 'cortexproject/cortex'
     runs-on: ubuntu-latest
     container:
