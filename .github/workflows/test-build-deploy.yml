@@ -130,7 +130,7 @@ jobs:
   deploy:
     needs: [build]
     # needs: [build, test, lint, integration, integration-configs-db]
-    if: github.ref == 'refs/heads/master' && github.repository == 'cortexproject/cortex'
+    # if: github.ref == 'refs/heads/master' && github.repository == 'cortexproject/cortex'
     runs-on: ubuntu-latest
     container:
       image: quay.io/cortexproject/build-image:update-golang-1.14.9-eb0c8d4d2
