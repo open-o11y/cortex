@@ -59,6 +59,7 @@ jobs:
         with:
           ssh-key: ${{ secrets.SSH_PRIVATE_KEY_2 }}
       - run: echo "$(git config remote.origin.url)"
+      - run: "echo $(ssh git@github.com)"
       - name: Install Docker Client
         run: |
           set -x
@@ -78,7 +79,6 @@ jobs:
         uses: webfactory/ssh-agent@v0.4.1
         with:
           ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY_2 }}
-      - run: echo -e "Host github.com\n\tStrictHostKeyChecking no\n" >> ~/.ssh/config
       - name: Deploy Website
         run: make BUILD_IN_CONTAINER=false web-deploy
         env:
