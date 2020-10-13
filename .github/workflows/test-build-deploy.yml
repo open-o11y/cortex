@@ -57,7 +57,7 @@ jobs:
       - name: Checkout Repo
         uses: actions/checkout@v2
         with:
-          ssh-key: ${{ secrets.SSH_PRIVATE_KEY_2 }}
+          ssh-key: ${{ secrets.SSH_PRIVATE_KEY }}
       - run: echo "$(git config remote.origin.url)"
       - run: echo "$(ssh git@github.com)"
       - name: Install Docker Client
@@ -75,16 +75,17 @@ jobs:
         run: |
           touch build-image/.uptodate
           make BUILD_IN_CONTAINER=false web-build
-      # - name: Setup SSH Keys and known_hosts
-      #   env:
-      #     SSH_AUTH_SOCK: /tmp/ssh_agent.sock
-      #   run: |
-      #     mkdir -p ~/.ssh
-      #     ssh-keyscan github.com >> ~/.ssh/known_hosts
-      #     ssh-agent -a $SSH_AUTH_SOCK > /dev/null
-      #     ssh-add - <<< "${{ secrets.SSH_PRIVATE_KEY_2 }}"
+      - run: rm -rf /usr/bin/git
+      - name: Setup SSH Keys and known_hosts
+        env:
+          SSH_AUTH_SOCK: /tmp/ssh_agent.sock
+        run: |
+          mkdir -p ~/.ssh
+          ssh-keyscan github.com >> ~/.ssh/known_hosts
+          ssh-agent -a $SSH_AUTH_SOCK > /dev/null
+          ssh-add - <<< "${{ secrets.SSH_PRIVATE_KEY_2 }}"
         shell: bash
       - name: Deploy Website
         run: make BUILD_IN_CONTAINER=false web-deploy
-        # env:
-        #   SSH_AUTH_SOCK: /tmp/ssh_agent.sock
+        env:
+          SSH_AUTH_SOCK: /tmp/ssh_agent.sock
