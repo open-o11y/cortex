@@ -75,6 +75,9 @@ jobs:
         run: |
           touch build-image/.uptodate
           make BUILD_IN_CONTAINER=false web-build
+      - uses: webfactory/ssh-agent@v0.4.1
+          with:
+            ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
       - name: Deploy Website
         run: make BUILD_IN_CONTAINER=false web-deploy
       - name: Save Images
