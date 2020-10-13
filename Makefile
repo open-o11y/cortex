@@ -210,6 +210,8 @@ save-images:
 	done
 
 load-images:
+	echo "$(IMAGE_NAMES)"
+	echo "$(IMAGE_TAG)"
 	for image_name in $(IMAGE_NAMES); do \
 		if ! echo $$image_name | grep build; then \
 			docker load -i docker-images/$$(echo $$image_name | tr "/" _):$(IMAGE_TAG); \

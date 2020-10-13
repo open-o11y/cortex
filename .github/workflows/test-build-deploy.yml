@@ -80,6 +80,7 @@ jobs:
           mkdir /tmp/images
           ln -s /tmp/images ./docker-images
           make BUILD_IN_CONTAINER=false save-images
+      - run: echo "$(ls -al /tmp/images)"
       - name: Zip Docker Images
         run: tar -zcvf images.tar.gz /tmp/images
       - name: Upload Docker Images Artifact
@@ -108,7 +109,7 @@ jobs:
           sudo mv /tmp/go /usr/local/go
           cd -
       - name: Checkout Repo
-        uses: actions/checkout@v1
+        uses: actions/checkout@v2
       - name: Sym Link Expected Path to Workspace
         run: |
           sudo mkdir -p /go/src/github.com/cortexproject/cortex
@@ -119,6 +120,7 @@ jobs:
           name: Docker Images
       - name: Unzip Docker Images
         run: tar -zxvf images.tar.gz -C /
+      - run: echo "$(ls -al /tmp/images/)"
       - name: Load Docker Images
         run: |
           ln -s /tmp/images ./docker-images
