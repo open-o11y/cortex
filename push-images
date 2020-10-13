@@ -29,8 +29,8 @@ done
 
 push_image() {
     local image="$1"
-    echo "Pushing quay.io/ghamigrationtest/ghamigrationtest:${IMAGE_TAG}"
-    docker push quay.io/ghamigrationtest/ghamigrationtest:${IMAGE_TAG}
+    echo "Pushing ${image}:${IMAGE_TAG}"
+    docker push ${image}:${IMAGE_TAG}
 
     if [ -n "${NO_QUAY}" ]; then
         return
@@ -40,8 +40,8 @@ push_image() {
     docker_hub_image=${image#$QUAY_PREFIX}
     docker tag ${image}:${IMAGE_TAG} ${docker_hub_image}:${IMAGE_TAG}
 
-    echo "Pushing quay.io/ghamigrationtest/ghamigrationtest:${IMAGE_TAG}"
-    docker push quay.io/ghamigrationtest/ghamigrationtest:${IMAGE_TAG}
+    echo "Pushing ${docker_hub_image}:${IMAGE_TAG}"
+    docker push ${docker_hub_image}:${IMAGE_TAG}
 }
 
 for image in ${IMAGES}; do
