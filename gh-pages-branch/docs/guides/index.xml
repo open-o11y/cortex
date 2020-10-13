@@ -1,0 +1,382 @@
+<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom"><channel><title>Cortex – Guides</title><link>/docs/guides/</link><description>Recent content in Guides on Cortex</description><generator>Hugo -- gohugo.io</generator><atom:link href="/docs/guides/index.xml" rel="self" type="application/rss+xml"/><item><title>Docs: Deleting Series</title><link>/docs/guides/deleting-series/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>/docs/guides/deleting-series/</guid><description>
+&lt;p>&lt;em>This feature is currently experimental and is only supported for Chunks storage.&lt;/em>&lt;/p>
+&lt;p>Cortex supports deletion of series using &lt;a href="https://prometheus.io/docs/prometheus/latest/querying/api/#delete-series">Prometheus compatible API&lt;/a>.
+It however does not support &lt;a href="https://prometheus.io/docs/prometheus/latest/querying/api/#clean-tombstones">Prometheuses Clean Tombstones&lt;/a> API because Cortex uses a different mechanism to manage deletions.&lt;/p>
+&lt;h3 id="how-it-works">How it works&lt;/h3>
+&lt;p>A new service called &lt;code>purger&lt;/code> is added which exposes deletion APIs and does the processing of the requests.
+To store the requests, and some additional information while performing deletions, the purger requires configuring an index and object store respectively for it.
+For more information about the &lt;code>purger&lt;/code> configuration, please refer to the &lt;a href="/docs/configuration/configuration-file/#purger_config">config file reference&lt;/a> documentation.&lt;/p>
+&lt;p>All the requests specified below needs to be sent to &lt;code>purger&lt;/code>.&lt;/p>
+&lt;p>&lt;strong>Note:&lt;/strong> If you have enabled multi-tenancy in your Cortex cluster then deletion APIs requests require to have the &lt;code>X-Scope-OrgID&lt;/code> header set like for any other Cortex API.&lt;/p>
+&lt;h4 id="requesting-deletion">Requesting Deletion&lt;/h4>
+&lt;p>By calling the &lt;code>/api/v1/admin/tsdb/delete_series&lt;/code> API like how it is done in &lt;a href="https://prometheus.io/docs/prometheus/latest/querying/api/#delete-series">Prometheus&lt;/a>, you can request the deletion of series.
+Delete Series requests are immediately honored by eliminating series requested for deletion from query responses without actually deleting them from storage.
+The actual data is not deleted from storage until period configured for &lt;code>-purger.delete-request-cancel-period&lt;/code> CLI flag or its respective YAML config option which helps operators take informed decision about continuing with the deletion or cancelling the request.&lt;/p>
+&lt;p>Cortex would keep eliminating series requested for deletion until the &lt;code>purger&lt;/code> is done processing the delete request or the delete request gets cancelled.&lt;/p>
+&lt;p>&lt;em>Sample cURL command:&lt;/em>&lt;/p>
+&lt;pre>&lt;code>curl -X POST \
+'&amp;lt;purger_addr&amp;gt;/api/v1/admin/tsdb/delete_series?match%5B%5D=up&amp;amp;start=1591616227&amp;amp;end=1591619692' \
+-H 'x-scope-orgid: &amp;lt;tenant-id&amp;gt;'
+&lt;/code>&lt;/pre>&lt;h4 id="cancellation-of-delete-request">Cancellation of Delete Request&lt;/h4>
+&lt;p>Cortex allows cancellation of delete requests until they are not picked up for processing, which is controlled by the &lt;code>-purger.delete-request-cancel-period&lt;/code> CLI flag or its respective YAML config option.
+Since Cortex does query time filtering of data request for deletion until it is actually deleted, you can take an informed decision to cancel the delete request by calling the API defined below:&lt;/p>
+&lt;pre>&lt;code>POST /api/v1/admin/tsdb/cancel_delete_request?request_id=&amp;lt;request_id&amp;gt;
+PUT /api/v1/admin/tsdb/cancel_delete_request?request_id=&amp;lt;request_id&amp;gt;
+&lt;/code>&lt;/pre>&lt;p>&lt;em>Sample cURL command:&lt;/em>&lt;/p>
+&lt;pre>&lt;code>curl -X POST \
+'&amp;lt;purger_addr&amp;gt;/api/v1/admin/tsdb/cancel_delete_request?request_id=&amp;lt;request_id&amp;gt;' \
+-H 'x-scope-orgid: &amp;lt;tenant-id&amp;gt;'
+&lt;/code>&lt;/pre>&lt;p>You can find the id of the request that you want to cancel by using the GET &lt;code>delete_series&lt;/code> API defined below.&lt;/p>
+&lt;h4 id="listing-delete-requests">Listing Delete Requests&lt;/h4>
+&lt;p>You can list the created delete requests using following API:&lt;/p>
+&lt;pre>&lt;code>GET /api/v1/admin/tsdb/delete_series
+&lt;/code>&lt;/pre>&lt;p>&lt;em>Sample cURL command:&lt;/em>&lt;/p>
+&lt;pre>&lt;code>curl -X GET \
+&amp;lt;purger_addr&amp;gt;/api/v1/admin/tsdb/delete_series \
+-H 'x-scope-orgid: &amp;lt;orgid&amp;gt;'
+&lt;/code>&lt;/pre>&lt;p>&lt;strong>NOTE:&lt;/strong> List API returns both processed and un-processed requests except the cancelled ones since they are removed from the store.&lt;/p></description></item><item><title>Docs: gRPC storage plugin</title><link>/docs/guides/grpc-based-plugin/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>/docs/guides/grpc-based-plugin/</guid><description>
+&lt;p>&lt;em>This feature is currently experimental and is only supported for Chunks storage.&lt;/em>&lt;/p>
+&lt;p>Cortex chunks storage supports a &lt;strong>gRPC-based plugin system&lt;/strong> to use alternative backends for the index and chunks store.
+A store plugin is a gRPC-based server which implements the methods required by the index and chunks store. Cortex chunks storage schema is then configured to use the plugin as backend system and gRPC will be used to communicate between Cortex and the plugin.
+For example, if you&amp;rsquo;re deploying your Cortex cluster on Kubernetes, the plugin would run as a sidecar container of your Cortex pods and the Cortex&amp;rsquo;s &lt;code>-grpc-store.server-address&lt;/code> should be configured to the endpoint exposed by the sidecar plugin (eg. &lt;code>localhost:&amp;lt;port&amp;gt;&lt;/code>).&lt;/p>
+&lt;h3 id="how-it-works">How it works&lt;/h3>
+&lt;p>In the cortex configuration file, add &lt;code>store&lt;/code> and &lt;code>object_store&lt;/code> as &lt;code>grpc-store&lt;/code> and configure storage with plugin server endpoint (ie. the address to the gRPC server which implements the cortex chunk store methods).&lt;/p>
+&lt;pre>&lt;code>schema:
+configs:
+- from: 2019-07-29
+store: grpc-store
+object_store: grpc-store
+schema: v10
+index:
+prefix: index_
+period: 168h
+chunks:
+prefix: chunk_
+period: 168h
+storage:
+grpc_store:
+# gRPC server address
+server_address: localhost:6666
+&lt;/code>&lt;/pre>&lt;h2 id="community-plugins">Community plugins&lt;/h2>
+&lt;p>The following list shows Cortex storage plugins built and shared by the community:&lt;/p>
+&lt;ol>
+&lt;li>&lt;a href="https://github.com/VineethReddy02/cortex-mongo-store">gRPC based Cortex chunk store for Mongo&lt;/a>&lt;/li>
+&lt;li>&lt;a href="https://github.com/VineethReddy02/cortex-mysql-store">gRPC based Cortex chunk store for Mysql&lt;/a>&lt;/li>
+&lt;/ol></description></item><item><title>Docs: Config for horizontally scaling the Ruler</title><link>/docs/guides/ruler-sharding/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>/docs/guides/ruler-sharding/</guid><description>
+&lt;h2 id="context">Context&lt;/h2>
+&lt;p>One option to scale the ruler is by scaling it horizontally. However, with multiple ruler instances running they will need to coordinate to determine which instance will evaluate which rule. Similar to the ingesters, the rulers establish a hash ring to divide up the responsibilities of evaluating rules.&lt;/p>
+&lt;h2 id="config">Config&lt;/h2>
+&lt;p>In order to enable sharding in the ruler the following flag needs to be set:&lt;/p>
+&lt;pre>&lt;code> -ruler.enable-sharding=true
+&lt;/code>&lt;/pre>&lt;p>In addition the ruler requires it&amp;rsquo;s own ring to be configured, for instance:&lt;/p>
+&lt;pre>&lt;code> -ruler.ring.consul.hostname=consul.dev.svc.cluster.local:8500
+&lt;/code>&lt;/pre>&lt;p>The only configuration that is required is to enable sharding and configure a key value store. From there the rulers will shard and handle the division of rules automatically.&lt;/p>
+&lt;p>Unlike ingesters, rulers do not hand over responsibility: all rules are re-sharded randomly every time a ruler is added to or removed from the ring.&lt;/p>
+&lt;h2 id="ruler-storage">Ruler Storage&lt;/h2>
+&lt;p>The ruler supports six kinds of storage (configdb, azure, gcs, s3, swift, local). Most kinds of storage work with the sharded ruler configuration in an obvious way. i.e. configure all rulers to use the same backend.&lt;/p>
+&lt;p>The local implementation reads &lt;a href="https://prometheus.io/docs/prometheus/latest/configuration/recording_rules/">Prometheus recording rules&lt;/a> off of the local filesystem. This is a read only backend that does not support the creation and deletion of rules through &lt;a href="https://cortexmetrics.io/docs/apis/#ruler">the API&lt;/a>. Despite the fact that it reads the local filesystem this method can still be used in a sharded ruler configuration if the operator takes care to load the same rules to every ruler. For instance this could be accomplished by mounting a &lt;a href="https://kubernetes.io/docs/concepts/configuration/configmap/">Kubernetes ConfigMap&lt;/a> onto every ruler pod.&lt;/p>
+&lt;p>A typical local config may look something like:&lt;/p>
+&lt;pre>&lt;code> -ruler.storage.type=local
+-ruler.storage.local.directory=/tmp/cortex/rules
+&lt;/code>&lt;/pre>&lt;p>With the above configuration the ruler would expect the following layout:&lt;/p>
+&lt;pre>&lt;code>/tmp/cortex/rules/&amp;lt;tenant id&amp;gt;/rules1.yaml
+/rules2.yaml
+&lt;/code>&lt;/pre>&lt;p>Yaml files are expected to be in the &lt;a href="https://prometheus.io/docs/prometheus/latest/configuration/recording_rules/#recording-rules">Prometheus format&lt;/a>.&lt;/p></description></item><item><title>Docs: Shuffle Sharding</title><link>/docs/guides/shuffle-sharding/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>/docs/guides/shuffle-sharding/</guid><description>
+&lt;p>Cortex leverages on sharding techniques to horizontally scale both single and multi-tenant clusters beyond the capacity of a single node.&lt;/p>
+&lt;h2 id="background">Background&lt;/h2>
+&lt;p>The &lt;strong>default sharding strategy&lt;/strong> employed by Cortex distributes the workload across the entire pool of instances running a given service (eg. ingesters). For example, on the write path each tenant&amp;rsquo;s series are sharded across all ingesters, regardless how many active series the tenant has or how many different tenants are in the cluster.&lt;/p>
+&lt;p>The default strategy allows to have a fair balance on the resources consumed by each instance (ie. CPU and memory) and to maximise these resources across the cluster.&lt;/p>
+&lt;p>However, in a &lt;strong>multi-tenant&lt;/strong> cluster this approach also introduces some &lt;strong>downsides&lt;/strong>:&lt;/p>
+&lt;ol>
+&lt;li>An outage affects all tenants&lt;/li>
+&lt;li>A misbehaving tenant (eg. causing out of memory) could affect all other tenants&lt;/li>
+&lt;/ol>
+&lt;p>The goal of &lt;strong>shuffle sharding&lt;/strong> is to provide an alternative sharding strategy to reduce the blast radius of an outage and better isolate tenants.&lt;/p>
+&lt;h2 id="what-is-shuffle-sharding">What is shuffle sharding&lt;/h2>
+&lt;p>Shuffle sharding is a technique used to isolate different tenant&amp;rsquo;s workloads and to give each tenant a single-tenant experience even if they&amp;rsquo;re running in a shared cluster. This technique has been publicly shared and clearly explained by AWS in their &lt;a href="https://aws.amazon.com/builders-library/workload-isolation-using-shuffle-sharding/">builders&amp;rsquo; library&lt;/a> and a reference implementation has been shown in the &lt;a href="https://github.com/awslabs/route53-infima/blob/master/src/main/java/com/amazonaws/services/route53/infima/SimpleSignatureShuffleSharder.java">Route53 Infima library&lt;/a>.&lt;/p>
+&lt;p>The idea is to assign each tenant a shard composed by a subset of the Cortex service instances, aiming to minimize the overlapping instances between two different tenants. Shuffle sharding brings the following &lt;strong>benefits&lt;/strong> over the default sharding strategy:&lt;/p>
+&lt;ul>
+&lt;li>An outage on some Cortex cluster instances/nodes will only affect a subset of tenants.&lt;/li>
+&lt;li>A misbehaving tenant will affect only its shard instances. Due to the low overlap of instances between different tenants, it&amp;rsquo;s statistically quite likely that any other tenant will run on different instances or only a subset of instances will match the affected ones.&lt;/li>
+&lt;/ul>
+&lt;h3 id="low-overlapping-instances-probability">Low overlapping instances probability&lt;/h3>
+&lt;p>For example, given a Cortex cluster running &lt;strong>50 ingesters&lt;/strong> and assigning &lt;strong>each tenant 4&lt;/strong> out of 50 ingesters, shuffling instances between each tenant, we get &lt;strong>230K possible combinations&lt;/strong>.&lt;/p>
+&lt;p>Randomly picking two different tenants we have the:&lt;/p>
+&lt;ul>
+&lt;li>71% chance that they will not share any instance&lt;/li>
+&lt;li>26% chance that they will share only 1 instance&lt;/li>
+&lt;li>2.7% chance that they will share 2 instances&lt;/li>
+&lt;li>0.08% chance that they will share 3 instances&lt;/li>
+&lt;li>Only a 0.0004% chance that their instances will fully overlap&lt;/li>
+&lt;/ul>
+&lt;p>&lt;img src="/images/guides/shuffle-sharding-probability.png" alt="Shuffle sharding probability">&lt;/p>
+&lt;!-- Chart source at https://docs.google.com/spreadsheets/d/1FXbiWTXi6bdERtamH-IfmpgFq1fNL4GP_KX_yJvbRi4/edit -->
+&lt;h2 id="cortex-shuffle-sharding">Cortex shuffle sharding&lt;/h2>
+&lt;p>Cortex currently supports shuffle sharding in the following services:&lt;/p>
+&lt;ul>
+&lt;li>&lt;a href="#ingesters-shuffle-sharding">Ingesters&lt;/a>&lt;/li>
+&lt;li>&lt;a href="#query-frontend-shuffle-sharding">Query-frontend&lt;/a>&lt;/li>
+&lt;li>&lt;a href="#store-gateway-shuffle-sharding">Store-gateway&lt;/a>&lt;/li>
+&lt;li>&lt;a href="#ruler-shuffle-sharding">Ruler&lt;/a>&lt;/li>
+&lt;/ul>
+&lt;p>Shuffle sharding is &lt;strong>disabled by default&lt;/strong> and needs to be explicitly enabled in the configuration.&lt;/p>
+&lt;h3 id="guaranteed-properties">Guaranteed properties&lt;/h3>
+&lt;p>The Cortex shuffle sharding implementation guarantees the following properties:&lt;/p>
+&lt;ul>
+&lt;li>&lt;strong>Stability&lt;/strong>&lt;br />
+Given a consistent state of the hash ring, the shuffle sharding algorithm always selects the same instances for a given tenant, even across different machines.&lt;/li>
+&lt;li>&lt;strong>Consistency&lt;/strong>&lt;br />
+Adding or removing 1 instance from the hash ring leads to only 1 instance changed at most, in each tenant&amp;rsquo;s shard.&lt;/li>
+&lt;li>&lt;strong>Shuffling&lt;/strong>&lt;br />
+Probabilistically and for a large enough cluster, it ensures that every tenant gets a different set of instances, with a reduced number of overlapping instances between two tenants to improve failure isolation.&lt;/li>
+&lt;li>&lt;strong>Zone-awareness&lt;/strong>&lt;br />
+When &lt;a href="/docs/guides/zone-aware-replication/">zone-aware replication&lt;/a> is enabled, the subset of instances selected for each tenant contains a balanced number of instances for each availability zone.&lt;/li>
+&lt;/ul>
+&lt;h3 id="ingesters-shuffle-sharding">Ingesters shuffle sharding&lt;/h3>
+&lt;p>By default the Cortex distributor spreads the received series across all running ingesters.&lt;/p>
+&lt;p>When shuffle sharding is &lt;strong>enabled&lt;/strong> via &lt;code>-distributor.sharding-strategy=shuffle-sharding&lt;/code> (or its respective YAML config option), the distributor spreads each tenant series across &lt;code>-distributor.ingestion-tenant-shard-size&lt;/code> number of ingesters.&lt;/p>
+&lt;p>&lt;em>The shard size can be overridden on a per-tenant basis in the limits overrides configuration.&lt;/em>&lt;/p>
+&lt;h3 id="query-frontend-shuffle-sharding">Query-frontend shuffle sharding&lt;/h3>
+&lt;p>By default all Cortex queriers can execute received queries for given tenant.&lt;/p>
+&lt;p>When shuffle sharding is &lt;strong>enabled&lt;/strong> by setting &lt;code>-frontend.max-queriers-per-tenant&lt;/code> (or its respective YAML config option) to a value higher than 0 and lower than the number of available queriers, only specified number of queriers will execute queries for single tenant. Note that this distribution happens in query-frontend. When not using query-frontend, this option is not available.&lt;/p>
+&lt;p>&lt;em>The maximum number of queriers can be overridden on a per-tenant basis in the limits overrides configuration.&lt;/em>&lt;/p>
+&lt;h3 id="store-gateway-shuffle-sharding">Store-gateway shuffle sharding&lt;/h3>
+&lt;p>The Cortex store-gateway &amp;ndash; used by the &lt;a href="/docs/blocks-storage/">blocks storage&lt;/a> &amp;ndash; by default spreads each tenant&amp;rsquo;s blocks across all running store-gateways.&lt;/p>
+&lt;p>When shuffle sharding is &lt;strong>enabled&lt;/strong> via &lt;code>-store-gateway.sharding-strategy=shuffle-sharding&lt;/code> (or its respective YAML config option), each tenant blocks will be sharded across a subset of &lt;code>-store-gateway.tenant-shard-size&lt;/code> store-gateway instances.&lt;/p>
+&lt;p>&lt;em>The shard size can be overridden on a per-tenant basis setting &lt;code>store_gateway_tenant_shard_size&lt;/code> in the limits overrides configuration.&lt;/em>&lt;/p>
+&lt;p>&lt;em>Please check out the &lt;a href="/docs/blocks-storage/store-gateway/">store-gateway documentation&lt;/a> for more information about how it works.&lt;/em>&lt;/p>
+&lt;h3 id="ruler-shuffle-sharding">Ruler shuffle sharding&lt;/h3>
+&lt;p>Cortex ruler can run in three modes:&lt;/p>
+&lt;ol>
+&lt;li>&lt;strong>No sharding at all.&lt;/strong> This is the most basic mode of the ruler. It is activated by using &lt;code>-ruler.enable-sharding=false&lt;/code> (default) and works correctly only if single ruler is running. In this mode the Ruler loads all rules for all tenants.&lt;/li>
+&lt;li>&lt;strong>Default sharding&lt;/strong>, activated by using &lt;code>-ruler.enable-sharding=true&lt;/code> and &lt;code>-ruler.sharding-strategy=default&lt;/code> (default). In this mode rulers register themselves into the ring. Each ruler will then select and evaluate only those rules that it &amp;ldquo;owns&amp;rdquo;.&lt;/li>
+&lt;li>&lt;strong>Shuffle sharding&lt;/strong>, activated by using &lt;code>-ruler.enable-sharding=true&lt;/code> and &lt;code>-ruler.sharding-strategy=shuffle-sharding&lt;/code>. Similarly to default sharding, rulers use the ring to distribute workload, but rule groups for each tenant can only be evaluated on limited number of rulers (&lt;code>-ruler.tenant-shard-size&lt;/code>, can also be set per tenant as &lt;code>ruler_tenant_shard_size&lt;/code> in overrides).&lt;/li>
+&lt;/ol>
+&lt;p>Note that when using sharding strategy, each rule group is evaluated by single ruler only, there is no replication.&lt;/p></description></item><item><title>Docs: Zone Aware Replication</title><link>/docs/guides/zone-aware-replication/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>/docs/guides/zone-aware-replication/</guid><description>
+&lt;p>Cortex supports data replication for different services. By default, data is transparently replicated across the whole pool of service instances, regardless of whether these instances are all running within the same availability zone (or data center, or rack) or in different ones.&lt;/p>
+&lt;p>It is completely possible that all the replicas for the given data are held within the same availability zone, even if the Cortex cluster spans multiple zones. Storing multiple replicas for a given data within the same availability zone poses a risk for data loss if there is an outage affecting various nodes within a zone or a full zone outage.&lt;/p>
+&lt;p>For this reason, Cortex optionally supports zone-aware replication. When zone-aware replication is &lt;strong>enabled&lt;/strong>, replicas for the given data are guaranteed to span across different availability zones. This requires Cortex cluster to run at least in a number of zones equal to the configured replication factor.&lt;/p>
+&lt;p>The Cortex services supporting &lt;strong>zone-aware replication&lt;/strong> are:&lt;/p>
+&lt;ul>
+&lt;li>&lt;strong>&lt;a href="#distributors-and-ingesters-time-series-replication">Distributors and Ingesters&lt;/a>&lt;/strong>&lt;/li>
+&lt;li>&lt;strong>&lt;a href="#store-gateways-blocks-replication">Store-gateways&lt;/a>&lt;/strong> (&lt;a href="/docs/blocks-storage/">blocks storage&lt;/a> only)&lt;/li>
+&lt;/ul>
+&lt;h2 id="distributors--ingesters-time-series-replication">Distributors / Ingesters: time-series replication&lt;/h2>
+&lt;p>The Cortex time-series replication is used to hold multiple (typically 3) replicas of each time series in the &lt;strong>ingesters&lt;/strong>.&lt;/p>
+&lt;p>&lt;strong>To enable&lt;/strong> the zone-aware replication for the ingesters you should:&lt;/p>
+&lt;ol>
+&lt;li>Configure the availability zone for each ingester via the &lt;code>-ingester.availability-zone&lt;/code> CLI flag (or its respective YAML config option)&lt;/li>
+&lt;li>Rollout ingesters to apply the configured zone&lt;/li>
+&lt;li>Enable time-series zone-aware replication via the &lt;code>-distributor.zone-awareness-enabled&lt;/code> CLI flag (or its respective YAML config option). Please be aware this configuration option should be set to distributors, queriers and rulers.&lt;/li>
+&lt;/ol>
+&lt;h2 id="store-gateways-blocks-replication">Store-gateways: blocks replication&lt;/h2>
+&lt;p>The Cortex &lt;a href="/docs/blocks-storage/store-gateway/">store-gateway&lt;/a> (used only when Cortex is running with the &lt;a href="/docs/blocks-storage/">blocks storage&lt;/a>) supports blocks sharding, used to horizontally scale blocks in a large cluster without hitting any vertical scalability limit.&lt;/p>
+&lt;p>To enable the zone-aware replication for the store-gateways, please refer to the &lt;a href="/docs/blocks-storage/store-gateway/#zone-awareness">store-gateway&lt;/a> documentation.&lt;/p>
+&lt;h2 id="minimum-number-of-zones">Minimum number of zones&lt;/h2>
+&lt;p>For Cortex to function correctly, there must be at least the same number of availability zones as the replication factor. For example, if the replication factor is configured to 3 (default for time-series replication), the Cortex cluster should be spread at least over 3 availability zones.&lt;/p>
+&lt;p>It is safe to have more zones than the replication factor, but it cannot be less. Having fewer availability zones than replication factor causes a replica write to be missed, and in some cases, the write fails if the availability zones count is too low.&lt;/p>
+&lt;h2 id="impact-on-unbalanced-zones">Impact on unbalanced zones&lt;/h2>
+&lt;p>&lt;strong>Cortex requires that each zone runs the same number of instances&lt;/strong> of a given service for which the zone-aware replication is enabled. This guarantees a fair split of the workload across zones.&lt;/p>
+&lt;p>On the contrary, if zones are unbalanced, the zones with a lower number of instances would have an higher pressure on resources utilization (eg. CPU and memory) compared to zones with an higher number of instances.&lt;/p>
+&lt;h2 id="impact-on-costs">Impact on costs&lt;/h2>
+&lt;p>Depending on the underlying infrastructure being used, deploying Cortex across multiple availability zones may cause an increase in running costs as most cloud providers charge for inter availability zone networking. The most significant change would be for a Cortex cluster currently running in a single zone.&lt;/p></description></item><item><title>Docs: Running Cortex on Kubernetes</title><link>/docs/guides/kubernetes/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>/docs/guides/kubernetes/</guid><description>
+&lt;p>Because Cortex is designed to run multiple instances of each component
+(ingester, querier, etc.), you probably want to automate the placement
+and shepherding of these instances. Most users choose Kubernetes to do
+this, but this is not mandatory.&lt;/p>
+&lt;h2 id="configuration">Configuration&lt;/h2>
+&lt;h3 id="resource-requests">Resource requests&lt;/h3>
+&lt;p>If using Kubernetes, each container should specify resource requests
+so that the scheduler can place them on a node with sufficient capacity.&lt;/p>
+&lt;p>For example an ingester might request:&lt;/p>
+&lt;pre>&lt;code> resources:
+requests:
+cpu: 4
+memory: 10Gi
+&lt;/code>&lt;/pre>&lt;p>The specific values here should be adjusted based on your own
+experiences running Cortex - they are very dependent on rate of data
+arriving and other factors such as series churn.&lt;/p>
+&lt;h3 id="take-extra-care-with-ingesters">Take extra care with ingesters&lt;/h3>
+&lt;p>Ingesters hold hours of timeseries data in memory; you can configure
+Cortex to replicate the data but you should take steps to avoid losing
+all replicas at once:&lt;/p>
+&lt;ul>
+&lt;li>Don&amp;rsquo;t run multiple ingesters on the same node.&lt;/li>
+&lt;li>Don&amp;rsquo;t run ingesters on preemptible/spot nodes.&lt;/li>
+&lt;li>Spread out ingesters across racks / availability zones / whatever
+applies in your datacenters.&lt;/li>
+&lt;/ul>
+&lt;p>You can ask Kubernetes to avoid running on the same node like this:&lt;/p>
+&lt;pre>&lt;code> affinity:
+podAntiAffinity:
+preferredDuringSchedulingIgnoredDuringExecution:
+- weight: 100
+podAffinityTerm:
+labelSelector:
+matchExpressions:
+- key: name
+operator: In
+values:
+- ingester
+topologyKey: &amp;quot;kubernetes.io/hostname&amp;quot;
+&lt;/code>&lt;/pre>&lt;p>Give plenty of time for an ingester to hand over or flush data to
+store when shutting down; for Kubernetes this looks like:&lt;/p>
+&lt;pre>&lt;code> terminationGracePeriodSeconds: 2400
+&lt;/code>&lt;/pre>&lt;p>Ask Kubernetes to limit rolling updates to one ingester at a time, and
+signal the old one to stop before the new one is ready:&lt;/p>
+&lt;pre>&lt;code> strategy:
+rollingUpdate:
+maxSurge: 0
+maxUnavailable: 1
+&lt;/code>&lt;/pre>&lt;p>Ingesters provide an HTTP hook to signal readiness when all is well;
+this is valuable because it stops a rolling update at the first
+problem:&lt;/p>
+&lt;pre>&lt;code> readinessProbe:
+httpGet:
+path: /ready
+port: 80
+&lt;/code>&lt;/pre>&lt;p>We do not recommend configuring a liveness probe on ingesters -
+killing them is a last resort and should not be left to a machine.&lt;/p></description></item><item><title>Docs: Tracing</title><link>/docs/guides/tracing/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>/docs/guides/tracing/</guid><description>
+&lt;p>Cortex uses &lt;a href="https://www.jaegertracing.io/">Jaeger&lt;/a> to implement distributed
+tracing. We have found Jaeger invaluable for troubleshooting the behavior of
+Cortex in production.&lt;/p>
+&lt;h2 id="dependencies">Dependencies&lt;/h2>
+&lt;p>In order to send traces you will need to set up a Jaeger deployment. A
+deployment includes either the jaeger all-in-one binary, or else a distributed
+system of agents, collectors, and queriers. If running on Kubernetes, &lt;a href="https://github.com/jaegertracing/jaeger-kubernetes">Jaeger
+Kubernetes&lt;/a> is an excellent
+resource.&lt;/p>
+&lt;h2 id="configuration">Configuration&lt;/h2>
+&lt;p>In order to configure Cortex to send traces you must do two things:&lt;/p>
+&lt;ol>
+&lt;li>Set the &lt;code>JAEGER_AGENT_HOST&lt;/code> environment variable in all components to point
+to your Jaeger agent. This defaults to &lt;code>localhost&lt;/code>.&lt;/li>
+&lt;li>Enable sampling in the appropriate components:
+&lt;ul>
+&lt;li>The Ingester and Ruler self-initiate traces and should have sampling
+explicitly enabled.&lt;/li>
+&lt;li>Sampling for the Distributor and Query Frontend can be enabled in Cortex
+or in an upstream service such as your frontdoor.&lt;/li>
+&lt;/ul>
+&lt;/li>
+&lt;/ol>
+&lt;p>To enable sampling in Cortex components you can specify either
+&lt;code>JAEGER_SAMPLER_MANAGER_HOST_PORT&lt;/code> for remote sampling, or
+&lt;code>JAEGER_SAMPLER_TYPE&lt;/code> and &lt;code>JAEGER_SAMPLER_PARAM&lt;/code> to manually set sampling
+configuration. See the &lt;a href="https://github.com/jaegertracing/jaeger-client-go#environment-variables">Jaeger Client Go
+documentation&lt;/a>
+for the full list of environment variables you can configure.&lt;/p>
+&lt;p>Note that you must specify one of &lt;code>JAEGER_AGENT_HOST&lt;/code> or
+&lt;code>JAEGER_SAMPLER_MANAGER_HOST_PORT&lt;/code> in each component for Jaeger to be enabled,
+even if you plan to use the default values.&lt;/p></description></item><item><title>Docs: Ingesters rolling updates</title><link>/docs/guides/ingesters-rolling-updates/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>/docs/guides/ingesters-rolling-updates/</guid><description>
+&lt;p>Cortex &lt;a href="/docs/architecture/#ingester">ingesters&lt;/a> are semi-stateful.
+A running ingester holds several hours of time series data in memory, before they&amp;rsquo;re flushed to the long-term storage.
+When an ingester shutdowns, because of a rolling update or maintenance, the in-memory data must not be discarded in order to avoid any data loss.&lt;/p>
+&lt;p>In this document we describe the techniques employed to safely handle rolling updates, based on different setups:&lt;/p>
+&lt;ul>
+&lt;li>&lt;a href="#blocks-storage">Blocks storage&lt;/a>&lt;/li>
+&lt;li>&lt;a href="#chunks-storage-with-wal-enabled">Chunks storage with WAL enabled&lt;/a>&lt;/li>
+&lt;li>&lt;a href="#chunks-storage-with-wal-disabled-hand-over">Chunks storage with WAL disabled&lt;/a>&lt;/li>
+&lt;/ul>
+&lt;h2 id="blocks-storage">Blocks storage&lt;/h2>
+&lt;p>The Cortex &lt;a href="/docs/blocks-storage/">blocks storage&lt;/a> requires ingesters to run with a persistent disk where the TSDB WAL and blocks are stored (eg. a StatefulSet when deployed on Kubernetes).&lt;/p>
+&lt;p>During a rolling update, the leaving ingester closes the open TSDBs, synchronize the data to disk (&lt;code>fsync&lt;/code>) and releases the disk resources.
+The new ingester, which is expected to reuse the same disk of the leaving one, will replay the TSDB WAL on startup in order to load back in memory the time series that have not been compacted into a block yet.&lt;/p>
+&lt;p>&lt;em>The blocks storage doesn&amp;rsquo;t support the series &lt;a href="#chunks-storage-with-wal-disabled-hand-over">hand-over&lt;/a>.&lt;/em>&lt;/p>
+&lt;h2 id="chunks-storage">Chunks storage&lt;/h2>
+&lt;p>The Cortex chunks storage optionally supports a write-ahead log (WAL).
+The rolling update procedure for a Cortex cluster running the chunks storage depends whether the WAL is enabled or not.&lt;/p>
+&lt;h3 id="chunks-storage-with-wal-enabled">Chunks storage with WAL enabled&lt;/h3>
+&lt;p>Similarly to the blocks storage, when Cortex is running the chunks storage with WAL enabled, it requires ingesters to run with a persistent disk where the WAL is stored (eg. a StatefulSet when deployed on Kubernetes).&lt;/p>
+&lt;p>During a rolling update, the leaving ingester closes the WAL, synchronize the data to disk (&lt;code>fsync&lt;/code>) and releases the disk resources.
+The new ingester, which is expected to reuse the same disk of the leaving one, will replay the WAL on startup in order to load back in memory the time series data.&lt;/p>
+&lt;p>&lt;em>For more information about the WAL, please refer to &lt;a href="/docs/production/ingesters-with-wal/">Ingesters with WAL&lt;/a>.&lt;/em>&lt;/p>
+&lt;h3 id="chunks-storage-with-wal-disabled-hand-over">Chunks storage with WAL disabled (hand-over)&lt;/h3>
+&lt;p>When Cortex is running the chunks storage with WAL disabled, Cortex supports on-the-fly series hand-over between a leaving ingester and a joining one.&lt;/p>
+&lt;p>The hand-over is based on the ingesters state stored in the ring. Each ingester could be in one of the following &lt;strong>states&lt;/strong>:&lt;/p>
+&lt;ul>
+&lt;li>&lt;code>PENDING&lt;/code>&lt;/li>
+&lt;li>&lt;code>JOINING&lt;/code>&lt;/li>
+&lt;li>&lt;code>ACTIVE&lt;/code>&lt;/li>
+&lt;li>&lt;code>LEAVING&lt;/code>&lt;/li>
+&lt;/ul>
+&lt;p>On startup, an ingester goes into the &lt;strong>&lt;code>PENDING&lt;/code>&lt;/strong> state.
+In this state, the ingester is waiting for a hand-over from another ingester that is &lt;code>LEAVING&lt;/code>.
+If no hand-over occurs within the configured timeout period (&amp;ldquo;auto-join timeout&amp;rdquo;, configurable via &lt;code>-ingester.join-after&lt;/code> option), the ingester will join the ring with a new set of random tokens (eg. during a scale up) and will switch its state to &lt;code>ACTIVE&lt;/code>.&lt;/p>
+&lt;p>When a running ingester in the &lt;strong>&lt;code>ACTIVE&lt;/code>&lt;/strong> state is notified to shutdown via &lt;code>SIGINT&lt;/code> or &lt;code>SIGTERM&lt;/code> Unix signal, the ingester switches to &lt;code>LEAVING&lt;/code> state. In this state it cannot receive write requests anymore, but it can still receive read requests for series it has in memory.&lt;/p>
+&lt;p>A &lt;strong>&lt;code>LEAVING&lt;/code>&lt;/strong> ingester looks for a &lt;code>PENDING&lt;/code> ingester to start a hand-over process with.
+If it finds one, that ingester goes into the &lt;code>JOINING&lt;/code> state and the leaver transfers all its in-memory data over to the joiner.
+On successful transfer the leaver removes itself from the ring and exits, while the joiner changes its state to &lt;code>ACTIVE&lt;/code>, taking over ownership of the leaver&amp;rsquo;s &lt;a href="/docs/architecture/#hashing">ring tokens&lt;/a>. As soon as the joiner switches it state to &lt;code>ACTIVE&lt;/code>, it will start receive both write requests from distributors and queries from queriers.&lt;/p>
+&lt;p>If the &lt;code>LEAVING&lt;/code> ingester does not find a &lt;code>PENDING&lt;/code> ingester after &lt;code>-ingester.max-transfer-retries&lt;/code> retries, it will flush all of its chunks to the long-term storage, then removes itself from the ring and exits. The chunks flushing to the storage may take several minutes to complete.&lt;/p>
+&lt;h4 id="higher-number-of-series--chunks-during-rolling-updates">Higher number of series / chunks during rolling updates&lt;/h4>
+&lt;p>During hand-over, neither the leaving nor joining ingesters will
+accept new samples. Distributors are aware of this, and &amp;ldquo;spill&amp;rdquo; the
+samples to the next ingester in the ring. This creates a set of extra
+&amp;ldquo;spilled&amp;rdquo; series and chunks which will idle out and flush after hand-over is
+complete.&lt;/p>
+&lt;h4 id="observability">Observability&lt;/h4>
+&lt;p>The following metrics can be used to observe this process:&lt;/p>
+&lt;ul>
+&lt;li>&lt;strong>&lt;code>cortex_member_ring_tokens_owned&lt;/code>&lt;/strong>&lt;br />
+How many tokens each ingester thinks it owns.&lt;/li>
+&lt;li>&lt;strong>&lt;code>cortex_ring_tokens_owned&lt;/code>&lt;/strong>&lt;br />
+How many tokens each ingester is seen to own by other components.&lt;/li>
+&lt;li>&lt;strong>&lt;code>cortex_ring_member_ownership_percent&lt;/code>&lt;/strong>&lt;br />
+Same as &lt;code>cortex_ring_tokens_owned&lt;/code> but expressed as a percentage.&lt;/li>
+&lt;li>&lt;strong>&lt;code>cortex_ring_members&lt;/code>&lt;/strong>&lt;br />
+How many ingesters can be seen in each state, by other components.&lt;/li>
+&lt;li>&lt;strong>&lt;code>cortex_ingester_sent_chunks&lt;/code>&lt;/strong>&lt;br />
+Number of chunks sent by leaving ingester.&lt;/li>
+&lt;li>&lt;strong>&lt;code>cortex_ingester_received_chunks&lt;/code>&lt;/strong>&lt;br />
+Number of chunks received by joining ingester.&lt;/li>
+&lt;/ul>
+&lt;p>You can see the current state of the ring via http browser request to
+&lt;code>/ring&lt;/code> on a distributor.&lt;/p></description></item><item><title>Docs: Capacity Planning</title><link>/docs/guides/capacity-planning/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>/docs/guides/capacity-planning/</guid><description>
+&lt;p>You will want to estimate how many nodes are required, how many of
+each component to run, and how much storage space will be required.
+In practice, these will vary greatly depending on the metrics being
+sent to Cortex.&lt;/p>
+&lt;p>Some key parameters are:&lt;/p>
+&lt;ol>
+&lt;li>The number of active series. If you have Prometheus already you
+can query &lt;code>prometheus_tsdb_head_series&lt;/code> to see this number.&lt;/li>
+&lt;li>Sampling rate, e.g. a new sample for each series every minute
+(the default Prometheus &lt;a href="https://prometheus.io/docs/prometheus/latest/configuration/configuration/">scrape_interval&lt;/a>).
+Multiply this by the number of active series to get the
+total rate at which samples will arrive at Cortex.&lt;/li>
+&lt;li>The rate at which series are added and removed. This can be very
+high if you monitor objects that come and go - for example if you run
+thousands of batch jobs lasting a minute or so and capture metrics
+with a unique ID for each one. &lt;a href="https://www.robustperception.io/using-tsdb-analyze-to-investigate-churn-and-cardinality">Read how to analyse this on
+Prometheus&lt;/a>.&lt;/li>
+&lt;li>How compressible the time-series data are. If a metric stays at
+the same value constantly, then Cortex can compress it very well, so
+12 hours of data sampled every 15 seconds would be around 2KB. On
+the other hand if the value jumps around a lot it might take 10KB.
+There are not currently any tools available to analyse this.&lt;/li>
+&lt;li>How long you want to retain data for, e.g. 1 month or 2 years.&lt;/li>
+&lt;/ol>
+&lt;p>Other parameters which can become important if you have particularly
+high values:&lt;/p>
+&lt;ol start="6">
+&lt;li>Number of different series under one metric name.&lt;/li>
+&lt;li>Number of labels per series.&lt;/li>
+&lt;li>Rate and complexity of queries.&lt;/li>
+&lt;/ol>
+&lt;p>Now, some rules of thumb:&lt;/p>
+&lt;ol>
+&lt;li>Each million series in an ingester takes 15GB of RAM. Total number
+of series in ingesters is number of active series times the
+replication factor. This is with the default of 12-hour chunks - RAM
+required will reduce if you set &lt;code>-ingester.max-chunk-age&lt;/code> lower
+(trading off more back-end database IO)&lt;/li>
+&lt;li>Each million series (including churn) consumes 15GB of chunk
+storage and 4GB of index, per day (so multiply by the retention
+period).&lt;/li>
+&lt;li>Each 100,000 samples/sec arriving takes 1 CPU in distributors.
+Distributors don&amp;rsquo;t need much RAM.&lt;/li>
+&lt;/ol>
+&lt;p>If you turn on compression between distributors and ingesters (for
+example to save on inter-zone bandwidth charges at AWS/GCP) they will use
+significantly more CPU (approx 100% more for distributor and 50% more
+for ingester).&lt;/p></description></item></channel></rss>

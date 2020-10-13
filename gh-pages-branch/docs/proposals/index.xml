@@ -1,0 +1,927 @@
+<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom"><channel><title>Cortex – Proposals</title><link>/docs/proposals/</link><description>Recent content in Proposals on Cortex</description><generator>Hugo -- gohugo.io</generator><atom:link href="/docs/proposals/index.xml" rel="self" type="application/rss+xml"/><item><title>Docs: Blocks storage sharding</title><link>/docs/proposals/blocks-storage-sharding/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>/docs/proposals/blocks-storage-sharding/</guid><description>
+&lt;ul>
+&lt;li>Author: &lt;a href="https://github.com/pracucci">Marco Pracucci&lt;/a>&lt;/li>
+&lt;li>Date: March 2020&lt;/li>
+&lt;li>Status: accepted&lt;/li>
+&lt;/ul>
+&lt;h2 id="problem">Problem&lt;/h2>
+&lt;p>In Cortex, when using the experimental blocks storage, each querier internally runs the Thanos &lt;a href="https://github.com/thanos-io/thanos/blob/master/pkg/store/bucket.go">&lt;code>BucketStore&lt;/code>&lt;/a>. This means that each querier has a full view over all blocks in the long-term storage and all blocks index headers are loaded in each querier memory. The querier memory usage linearly increase with number and size of all blocks in the storage, imposing a scalability limit to the blocks storage.&lt;/p>
+&lt;p>In this proposal we want to solve this. In particular, we want to:&lt;/p>
+&lt;ol>
+&lt;li>Shard blocks (index headers) across a pool of nodes&lt;/li>
+&lt;li>Do not compromise HA on the read path (if a node fails, queries should continue to work)&lt;/li>
+&lt;li>Do not compromise correctness (either the query result is correct or it fails)&lt;/li>
+&lt;/ol>
+&lt;h2 id="proposed-solution">Proposed solution&lt;/h2>
+&lt;p>The idea is to introduce a new Cortex service - &lt;code>store-gateway&lt;/code> - internally running the Thanos &lt;a href="https://github.com/thanos-io/thanos/blob/master/pkg/store/bucket.go">&lt;code>BucketStore&lt;/code>&lt;/a>. At query time, a querier will run a query fetching the matching series both from ingesters and the subset of gateways holding the related blocks (based on the query time range). Blocks are replicated across the gateways in order to guarantee query results consistency and HA even in the case of a gateway instance failure.&lt;/p>
+&lt;h3 id="ring-based-sharding-and-replication">Ring-based sharding and replication&lt;/h3>
+&lt;p>In order to build blocks sharding and replication, the &lt;code>store-gateway&lt;/code> instances form a &lt;a href="/docs/architecture/#the-hash-ring">ring&lt;/a>. Each gateway instance uses a custom &lt;a href="https://github.com/thanos-io/thanos/blob/master/pkg/block/fetcher.go#L108">&lt;code>MetaFetcherFilter&lt;/code>&lt;/a> to filter blocks loaded on the instance itself, keeping only blocks whose &lt;code>hash(block-id)&lt;/code> is within the tokens range assigned to the gateway instance within the ring.&lt;/p>
+&lt;p>Within a gateway, the blocks synchronization is triggered in two cases:&lt;/p>
+&lt;ol>
+&lt;li>&lt;strong>Periodically&lt;/strong>&lt;br />
+to discover new blocks uploaded by ingesters or compactor, and delete old blocks removed due to retention or by the compactor&lt;/li>
+&lt;li>&lt;strong>On-demand&lt;/strong>&lt;br/>
+when the ring topology changes (the tokens ranges assigned to the gateway instance have changed)&lt;/li>
+&lt;/ol>
+&lt;p>It&amp;rsquo;s important to outline that the sync takes time (typically will have to re-scan the bucket and download new blocks index headers) and Cortex needs to guarantee query results consistency at any given time (&lt;em>see below&lt;/em>).&lt;/p>
+&lt;h3 id="query-execution">Query execution&lt;/h3>
+&lt;p>When a querier executes a query, it will need to fetch series both from ingesters and the store-gateway instances.&lt;/p>
+&lt;p>For a given query, the number of blocks to query is expected to be low, especially if the Cortex cluster is running the &lt;code>query-frontend&lt;/code> with a &lt;code>24h&lt;/code> query split interval. In this scenario, whatever is the client&amp;rsquo;s query time range, the &lt;code>query-frontend&lt;/code> will split the client&amp;rsquo;s query into partitioned queries each with up to &lt;code>24h&lt;/code> time range and the querier will likely hit not more than 1 block per partitioned query (except for the last 24h for which blocks may have not been compacted yet).&lt;/p>
+&lt;p>Given this assumption, we want to avoid sending every query to every store-gateway instance. The querier should be able to take an informed decision about the minimum subset of store-gateway instances which needs to query given a time range.&lt;/p>
+&lt;p>The idea is to run the &lt;a href="https://github.com/thanos-io/thanos/blob/master/pkg/block/fetcher.go#L127">&lt;code>MetaFetcher&lt;/code>&lt;/a> also within the querier, but without any sharding filter (contrary to the store-gateway). At any given point in time, the querier knows the entire list of blocks in the storage. When the querier executes the &lt;code>Select()&lt;/code> (or &lt;code>SelectSorted()&lt;/code>) it does:&lt;/p>
+&lt;ol>
+&lt;li>Compute the list of blocks by the query time range&lt;/li>
+&lt;li>Compute the minimum list of store-gateway instances containing the required blocks (using the information from the ring)&lt;/li>
+&lt;li>Fetch series from ingesters and the matching store-gateway instances&lt;/li>
+&lt;li>Merge and deduplicate received series
+&lt;ul>
+&lt;li>Optimization: can be skipped if the querier hits only 1 store-gateway&lt;/li>
+&lt;/ul>
+&lt;/li>
+&lt;/ol>
+&lt;h3 id="query-results-consistency">Query results consistency&lt;/h3>
+&lt;p>When a querier executes a query, it should guarantee that either all blocks matching the time range are queried or the query fails.&lt;/p>
+&lt;p>However, due to the (intentional) lack of a strong coordination between queriers and store-gateways, and the ring topology which can change any time, there&amp;rsquo;s no guarantee that the blocks assigned to a store-gateway shard are effectively loaded on the store-gateway itself at any given point in time.&lt;/p>
+&lt;p>The idea is introduce a &lt;strong>consistency check in the querier&lt;/strong>. When a store-gateway receives a request from the querier, the store-gateway includes in the response the list of block IDs currently loaded on the store-gateway itself. The querier can then merge the list of block IDs received from all store-gateway hit, and match it against the list of block IDs computed at the beginning of the query execution.&lt;/p>
+&lt;p>There are three possible scenarios:&lt;/p>
+&lt;ol>
+&lt;li>The list match: all good&lt;/li>
+&lt;li>All the blocks known by the querier are within the list of blocks returned by store-gateway, but the store-gateway also included blocks unknown to the querier: all good (it means the store-gateways have discovered and loaded new blocks before the querier discovered them)&lt;/li>
+&lt;li>Some blocks known by the querier are &lt;strong>not&lt;/strong> within the list of blocks returned by store-gateway: potential consistency issue&lt;/li>
+&lt;/ol>
+&lt;p>We want to protect from a partial results response which may occur in the case #3. However, there are some legit cases which, if not handled, would lead to frequent false positives. Given the querier and store-gateway instances independently scan the bucket at a regular interval (to find new blocks or deleted blocks), we may be in one of the following cases:&lt;/p>
+&lt;p>a. The querier has discovered new blocks before the store-gateway successfully discovered and loaded them
+b. The store-gateway has offloaded blocks &amp;ldquo;marked for deletion&amp;rdquo; before the querier&lt;/p>
+&lt;p>To protect from case (a), we can exclude the blocks which have been uploaded in the last &lt;code>X&lt;/code> time from the consistency check (same technique already used in other Thanos components). This &lt;code>X&lt;/code> delay time is used to give the store-gateway enough time to discover and load new blocks, before the querier consider them for the consistency check. This value &lt;code>X&lt;/code> should be greater than the &lt;code>-experimental.blocks-storage.bucket-store.consistency-delay&lt;/code>, because we do expect the querier to consider a block for consistency check once it&amp;rsquo;s reasonably safe to assume that its store-gateway already loaded it.&lt;/p>
+&lt;p>To protect from case (b) we need to understand how blocks are offloaded. The &lt;code>BucketStore&lt;/code> (running within the store-gateway) offloads a block as soon as it&amp;rsquo;s not returned by the &lt;code>MetaFetcher&lt;/code>. This means we can configure the &lt;code>MetaFetcher&lt;/code> with a &lt;a href="https://github.com/thanos-io/thanos/blob/4bd19b16a752e9ceb1836c21d4156bdeb517fe50/pkg/block/fetcher.go#L648">&lt;code>IgnoreDeletionMarkFilter&lt;/code>&lt;/a> with a delay of &lt;code>X&lt;/code> (could be the same value used for case (a)) and in the querier exclude the blocks which have been marked for deletion more than &lt;code>X&lt;/code> time ago from the consistency check.&lt;/p>
+&lt;h2 id="trade-offs">Trade-offs&lt;/h2>
+&lt;p>The proposed solution comes with the following trade-offs:&lt;/p>
+&lt;ul>
+&lt;li>A querier is not ready until it has completed an initial full scan of the bucket, downloading the &lt;code>meta.json&lt;/code> file of every block&lt;/li>
+&lt;li>A store-gateway is not ready until it has completed an initial full scan of the bucket, downloading the &lt;code>meta.json&lt;/code> and index header of each block matching its shard&lt;/li>
+&lt;li>If a querier hits 2+ store-gateways it may receive duplicated series if the 2+ store-gateways share some blocks due to the replication factor&lt;/li>
+&lt;/ul></description></item><item><title>Docs: Documentation Versioning</title><link>/docs/proposals/documentation-versioning/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>/docs/proposals/documentation-versioning/</guid><description>
+&lt;ul>
+&lt;li>Author: &lt;a href="https://github.com/jaybatra26">Jay Batra&lt;/a>&lt;/li>
+&lt;li>Date: March 2020&lt;/li>
+&lt;li>Status: proposal&lt;/li>
+&lt;/ul>
+&lt;h2 id="problem">Problem&lt;/h2>
+&lt;p>In Cortex, currently, we are missing versioning of documentation. The idea is to have version documentation just like Prometheus.&lt;a href="https://prometheus.io/docs/introduction/overview/">&lt;code>Prometheus&lt;/code>&lt;/a>. Documentation is the main source of information for current contributors and first-timers. A properly versioned documentation will help everyone to have a proper place to look for answers before flagging it in the community.&lt;/p>
+&lt;p>In this proposal, we want to solve this. In particular, we want to:&lt;/p>
+&lt;ol>
+&lt;li>Version specific pages of the documentation&lt;/li>
+&lt;li>Include links to change version (the version must be in the URL)&lt;/li>
+&lt;li>Include the master version and last 3 minor releases. Documentation defaults to the last minor release.&lt;/li>
+&lt;/ol>
+&lt;h2 id="proposed-solution">Proposed solution&lt;/h2>
+&lt;p>Currently, the documentation is residing under the docs/ folder of cortexproject/cortex. It is built by Hugo using the theme &lt;a href="https://www.docsy.dev">&lt;code>docsy&lt;/code>&lt;/a>. It will have a proper &lt;a href="https://www.docsy.dev/docs/adding-content/versioning/#adding-a-version-drop-down-menu">&lt;code>drop-down menu&lt;/code>&lt;/a> which will enable proper versioning. It has a section &lt;a href="https://www.docsy.dev/docs/adding-content/versioning/#adding-a-version-drop-down-menu">&lt;code>params.version&lt;/code>&lt;/a> in config.toml which will allow us to map URLs with proper versions. We will have to change all the occurrences of older doc links with new links. We will keep &lt;code>master&lt;/code> version with 3 latest &lt;code>release&lt;/code> versions. Each release is a minor version expressed as &lt;code>1.x&lt;/code>. The document would default to latest minor version.&lt;/p>
+&lt;p>From the current doc, the following paths (and all their subpages) should be versioned for now:&lt;/p>
+&lt;ol>
+&lt;li>&lt;a href="https://cortexmetrics.io/docs/apis/">https://cortexmetrics.io/docs/apis/&lt;/a>&lt;/li>
+&lt;li>&lt;a href="https://cortexmetrics.io/docs/configuration/">https://cortexmetrics.io/docs/configuration/&lt;/a> (moving v1.x Guarantees outside of the tree, because these shouldn&amp;rsquo;t be versioned)&lt;/li>
+&lt;/ol>
+&lt;p>The above should be versioned under a single URL path (&lt;code>/docs/running-cortex/&lt;/code> in the following example, but final prefix is still to be decided).&lt;/p>
+&lt;h3 id="example">Example:&lt;/h3>
+&lt;p>For &lt;code>master&lt;/code> version we would be able to use the above links via the following path&lt;/p>
+&lt;pre>&lt;code>/docs/running-cortex/master/configuration/
+/docs/running-cortex/master/api/
+&lt;/code>&lt;/pre>&lt;p>And for a minor version like &lt;code>1.x&lt;/code>:&lt;/p>
+&lt;pre>&lt;code>/docs/running-cortex/1.0/configuration/
+/docs/running-cortex/1.0/apis/
+&lt;/code>&lt;/pre>&lt;p>we&amp;rsquo;ll have versioned documentation only under the /docs/running-cortex/ prefix and, as a starting point, all versioned pages should go there.&lt;/p></description></item><item><title>Docs: Generalize Modules Service to make it extensible</title><link>/docs/proposals/generalize-modules/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>/docs/proposals/generalize-modules/</guid><description>
+&lt;ul>
+&lt;li>Author: @annanay25&lt;/li>
+&lt;li>Reviewers: @jtlisi, @pstibrany, @cyriltovena, @pracucci&lt;/li>
+&lt;li>Date: April 2020&lt;/li>
+&lt;li>Status: Accepted&lt;/li>
+&lt;/ul>
+&lt;h2 id="overview">Overview&lt;/h2>
+&lt;p>Cortex uses modules to start and operate services with dependencies. Inter-service dependencies are specified in a map and passed to a module manager which ensures that they are initialised in the right order of dependencies. While this works really well, the implementation is tied in specifically to the Cortex struct and is not flexible for use with other projects like Loki, which also require similar forms of dependency management.&lt;/p>
+&lt;p>We would like to extend modules in cortex to a generic dependency management framework, that can be used by any project with no ties to cortex.&lt;/p>
+&lt;h2 id="specific-goals">Specific goals&lt;/h2>
+&lt;ul>
+&lt;li>Framework should allow for reusing cortex modules and allow us to:
+&lt;ul>
+&lt;li>Add new modules&lt;/li>
+&lt;li>Overwrite the implementation of a current module&lt;/li>
+&lt;li>Manage dependencies&lt;/li>
+&lt;/ul>
+&lt;/li>
+&lt;li>Framework should allow for building an application from scratch using the &lt;code>modules&lt;/code> package, with no dependencies on Cortex. For ex: Remove code from Loki that was copied from &lt;code>pkg/cortex/cortex.go&lt;/code>.&lt;/li>
+&lt;/ul>
+&lt;h2 id="proposed-design">Proposed Design&lt;/h2>
+&lt;h3 id="modules-package">Modules package&lt;/h3>
+&lt;p>To make the modules package extensible, we need to abstract away any Cortex specific details from the module manager. The proposed design is to:&lt;/p>
+&lt;ul>
+&lt;li>Make a new component &lt;code>Manager&lt;/code>, which is envisioned to be a central manager for all modules of the application. It stores modules &amp;amp; dependencies, and will be housed under a new package &lt;code>pkg/util/modules&lt;/code>. &lt;code>Manager&lt;/code> has the following methods for interaction:&lt;/li>
+&lt;/ul>
+&lt;pre>&lt;code> func (m *Manager) RegisterModule(name string, initFn func() (Service, error))
+func (m *Manager) AddDependency(name string, dependsOn... string) error
+func (m *Manager) InitModuleServices(target string) (map[string]services.Service, error)
+&lt;/code>&lt;/pre>&lt;ul>
+&lt;li>
+&lt;p>Modules can be created by the application and registered with &lt;code>modules.Manager&lt;/code> using &lt;code>RegisterModule&lt;/code>. The parameters are:&lt;/p>
+&lt;ul>
+&lt;li>&lt;code>name&lt;/code>: Name of the module&lt;/li>
+&lt;li>&lt;code>initFn&lt;/code>: A function that will be used to start the module. If it returns nil, and other modules depend on it, &lt;code>InitModuleServices&lt;/code> will return an error.&lt;/li>
+&lt;/ul>
+&lt;/li>
+&lt;li>
+&lt;p>Dependencies between modules can be added using &lt;code>AddDependency&lt;/code>. The parameters to the function are:&lt;/p>
+&lt;ul>
+&lt;li>&lt;code>name&lt;/code>: Name of the module&lt;/li>
+&lt;li>&lt;code>dependsOn&lt;/code>: A variadic list of modules that the module depends on.&lt;/li>
+&lt;/ul>
+&lt;p>These need to be added before the call to &lt;code>InitModuleServices&lt;/code>.&lt;/p>
+&lt;/li>
+&lt;li>
+&lt;p>The application can be initialized by running &lt;code>initFn&lt;/code>'s of all the modules in the right order of dependencies by invoking &lt;code>InitModuleServices&lt;/code> with the target module name.&lt;/p>
+&lt;/li>
+&lt;/ul>
+&lt;h3 id="changes-to-pkgcortex">Changes to &lt;code>pkg/cortex&lt;/code>:&lt;/h3>
+&lt;ul>
+&lt;li>
+&lt;p>&lt;code>WrappedService&lt;/code> present in the current &lt;code>module&lt;/code> design will be deprecated. All &lt;code>initFn&lt;/code>'s will be wrapped into &lt;code>WrappedService&lt;/code> by default.&lt;/p>
+&lt;/li>
+&lt;li>
+&lt;p>While the process of loading modules into &lt;code>modules.Manager&lt;/code> should be remain as part of the &lt;code>Cortex.New()&lt;/code> function, &lt;code>InitModuleServices&lt;/code> should be part of &lt;code>Cortex.Run()&lt;/code> and to enable this, &lt;code>modules.Manager&lt;/code> would be made a member of the &lt;code>Cortex&lt;/code> struct.&lt;/p>
+&lt;/li>
+&lt;/ul>
+&lt;h2 id="usage">Usage&lt;/h2>
+&lt;p>Following these changes, the Modules package will be a generic dependency management framework that can be used by any project.&lt;/p>
+&lt;h4 id="to-use-the-modules-framework">To use the modules framework:&lt;/h4>
+&lt;ul>
+&lt;li>Import the &lt;code>pkg/util/modules&lt;/code> package, and initialize a new instance of the &lt;code>Manager&lt;/code> using &lt;code>modules.NewManager()&lt;/code>&lt;/li>
+&lt;li>Create components in the system that implement the services interface (present in &lt;code>pkg/util/services&lt;/code>).&lt;/li>
+&lt;li>Register each of these components as a module using &lt;code>Manager.RegisterModule()&lt;/code> by passing name of the module and &lt;code>initFn&lt;/code> for the module.&lt;/li>
+&lt;li>To add dependencies between modules, use &lt;code>Manager.AddDependency()&lt;/code>&lt;/li>
+&lt;li>Once all modules are added into &lt;code>modules.Manager&lt;/code>, initialize the application by calling &lt;code>Manager.InitModuleServices()&lt;/code> which initializes modules in the right order of dependencies.&lt;/li>
+&lt;/ul>
+&lt;h2 id="future-work">Future work&lt;/h2>
+&lt;ul>
+&lt;li>Extend the module manager to allow specifying multiple targets as opposed to a single target name supported currently.&lt;/li>
+&lt;li>Factor out &lt;code>Run()&lt;/code> method to make it independent of Cortex. This will help reduce replicated code in the Loki project as well as help manage &lt;code>modules.Manager&lt;/code> outside of the Cortex struct.&lt;/li>
+&lt;/ul></description></item><item><title>Docs: HTTP API Design</title><link>/docs/proposals/http-api-design/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>/docs/proposals/http-api-design/</guid><description>
+&lt;ul>
+&lt;li>Author: @jtlisi&lt;/li>
+&lt;li>Reviewers: @pracucci, @pstibrany, @khaines, @gouthamve&lt;/li>
+&lt;li>Date: March 2020&lt;/li>
+&lt;li>Status: Accepted&lt;/li>
+&lt;/ul>
+&lt;h2 id="overview">Overview&lt;/h2>
+&lt;p>The purpose of this design document is to propose a set of standards that should be the basis of the Cortex HTTP API. This document will outline the current state of the Cortex http api and describe limitations that result from the current approach. It will also outline a set of paradigms on how http routes should be created within Cortex.&lt;/p>
+&lt;h2 id="current-design">Current Design&lt;/h2>
+&lt;p>As things currently stand, the majority of HTTP API calls exist under the &lt;code>/api/prom&lt;/code> path prefix. This prefix is configurable. However, since this prefix is shared between all the modules which leads to conflicts if the Alertmanager is attempted to be run as as part of the single binary (#1722).&lt;/p>
+&lt;h2 id="proposed-design">Proposed Design&lt;/h2>
+&lt;h3 id="module-based-routing">Module-Based Routing&lt;/h3>
+&lt;p>Cortex incorporates three separate APIs: Alertmanager, Prometheus, and Cortex. Each of these APIs should use a separate route prefix that accurately describes the API. Currently, all of the api calls in Cortex reside under the configured http prefix. Instead the following routing tree is proposed:&lt;/p>
+&lt;h4 id="prometheus">&lt;code>/prometheus/*&lt;/code>&lt;/h4>
+&lt;p>Under this path prefix, Cortex will act as a Prometheus web server. It will host all of the required Prometheus api endpoints. For example to query cortex the endpoint &lt;code>/prometheus/api/v1/query_range&lt;/code> will be used.&lt;/p>
+&lt;h4 id="alertmanager">&lt;code>/alertmanager/*&lt;/code>&lt;/h4>
+&lt;p>Under this path prefix, Cortex will act as a Alertmanager web server. In this case, it will forward requests to the alertmanager and support the alertmanager API. This means for a user to access their Alertmanager UI, they will use the &lt;code>/alertmanager&lt;/code> path of cortex.&lt;/p>
+&lt;h4 id="apiv1----the-cortex-api-will-exist-under-this-path-prefix">&lt;code>/api/v1/*&lt;/code> &amp;ndash; The cortex API will exist under this path prefix.&lt;/h4>
+&lt;ul>
+&lt;li>&lt;code>/push&lt;/code>&lt;/li>
+&lt;li>&lt;code>/chunks&lt;/code>&lt;/li>
+&lt;li>&lt;code>/rules/*&lt;/code>&lt;/li>
+&lt;/ul>
+&lt;table>
+&lt;thead>
+&lt;tr>
+&lt;th>Current&lt;/th>
+&lt;th>Proposed&lt;/th>
+&lt;/tr>
+&lt;/thead>
+&lt;tbody>
+&lt;tr>
+&lt;td>&lt;code>/api/prom/push&lt;/code>&lt;/td>
+&lt;td>&lt;code>/api/v1/push&lt;/code>&lt;/td>
+&lt;/tr>
+&lt;tr>
+&lt;td>&lt;code>/api/prom/chunks&lt;/code>&lt;/td>
+&lt;td>&lt;code>/api/v1/chunks&lt;/code>&lt;/td>
+&lt;/tr>
+&lt;tr>
+&lt;td>&lt;code>/api/prom/rules/*&lt;/code>&lt;/td>
+&lt;td>&lt;code>/api/v1/rules/*&lt;/code>&lt;/td>
+&lt;/tr>
+&lt;/tbody>
+&lt;/table>
+&lt;h4 id="service-endpoints">Service Endpoints&lt;/h4>
+&lt;p>A number of endpoints currently exist that are not under the &lt;code>/api/prom&lt;/code> prefix that provide basic web interfaces and trigger operations for cortex services. These endpoints will all be placed under a url with their service name as a prefix if it is applicable.&lt;/p>
+&lt;table>
+&lt;thead>
+&lt;tr>
+&lt;th>Current&lt;/th>
+&lt;th>Proposed&lt;/th>
+&lt;/tr>
+&lt;/thead>
+&lt;tbody>
+&lt;tr>
+&lt;td>&lt;code>/status&lt;/code>&lt;/td>
+&lt;td>&lt;code>/multitenant-alertmanager/status&lt;/code>&lt;/td>
+&lt;/tr>
+&lt;tr>
+&lt;td>&lt;code>/config&lt;/code>&lt;/td>
+&lt;td>&lt;code>/config&lt;/code>&lt;/td>
+&lt;/tr>
+&lt;tr>
+&lt;td>&lt;code>/ring&lt;/code>&lt;/td>
+&lt;td>&lt;code>/ingester/ring&lt;/code>&lt;/td>
+&lt;/tr>
+&lt;tr>
+&lt;td>&lt;code>/ruler_ring&lt;/code>&lt;/td>
+&lt;td>&lt;code>/ruler/ring&lt;/code>&lt;/td>
+&lt;/tr>
+&lt;tr>
+&lt;td>&lt;code>/compactor/ring&lt;/code>&lt;/td>
+&lt;td>&lt;code>/compactor/ring&lt;/code>&lt;/td>
+&lt;/tr>
+&lt;tr>
+&lt;td>&lt;code>/store-gateway/ring&lt;/code>&lt;/td>
+&lt;td>&lt;code>/store-gateway/ring&lt;/code>&lt;/td>
+&lt;/tr>
+&lt;tr>
+&lt;td>&lt;code>/ha-tracker&lt;/code>&lt;/td>
+&lt;td>&lt;code>/distributor/ha_tracker&lt;/code>&lt;/td>
+&lt;/tr>
+&lt;tr>
+&lt;td>&lt;code>/all_user_stats&lt;/code>&lt;/td>
+&lt;td>&lt;code>/distributor/all_user_stats&lt;/code>&lt;/td>
+&lt;/tr>
+&lt;tr>
+&lt;td>&lt;code>/user_stats&lt;/code>&lt;/td>
+&lt;td>&lt;code>/distributor/user_stats&lt;/code>&lt;/td>
+&lt;/tr>
+&lt;tr>
+&lt;td>&lt;code>/flush&lt;/code>&lt;/td>
+&lt;td>&lt;code>/ingester/flush&lt;/code>&lt;/td>
+&lt;/tr>
+&lt;tr>
+&lt;td>&lt;code>/shutdown&lt;/code>&lt;/td>
+&lt;td>&lt;code>/ingester/shutdown&lt;/code>&lt;/td>
+&lt;/tr>
+&lt;/tbody>
+&lt;/table>
+&lt;h3 id="path-versioning">Path Versioning&lt;/h3>
+&lt;p>Cortex will utilize path based versioning similar to both Prometheus and Alertmanager. This will allow future versions of the API to be released with changes over time.&lt;/p>
+&lt;h3 id="backwards-compatibility">Backwards-Compatibility&lt;/h3>
+&lt;p>The new API endpoints and the current http prefix endpoints can be maintained concurrently. The flag to configure these endpoints will be maintained as &lt;code>http.prefix&lt;/code>. This will allow us to roll out the new API without disrupting the current routing schema. The original http prefix endpoints can maintained indefinitely or be phased out over time. Deprecation warnings can be added to the current API either when initialized or utilized. This can be accomplished by injecting a middleware that logs a warning whenever a legacy API endpoint is used.&lt;/p>
+&lt;p>In cases where Cortex is run as a single binary, the Alertmanager module will only be accesible using the new API.&lt;/p>
+&lt;h3 id="implementation">Implementation&lt;/h3>
+&lt;p>This will be implemented by adding an API module to the Cortex service. This module will handle setting up all the required HTTP routes with Cortex. It will be designed around a set of interfaces required to fulfill the API. This is similar to how the &lt;code>v1&lt;/code> Prometheus API is implemented.&lt;/p>
+&lt;h3 id="style">Style&lt;/h3>
+&lt;ul>
+&lt;li>All new paths will utilize &lt;code>_&lt;/code> instead of &lt;code>-&lt;/code> for their url to conform with Prometheus and its use of the underscore in the &lt;code>query_range&lt;/code> endpoint. This applies to all operations endpoints. Component names in the path can still contain dashes. For example: &lt;code>/store-gateway/ring&lt;/code>.&lt;/li>
+&lt;/ul></description></item><item><title>Docs: Migrating ingesters from chunks to blocks and back.</title><link>/docs/proposals/ingesters-migration/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>/docs/proposals/ingesters-migration/</guid><description>
+&lt;ul>
+&lt;li>Author: @pstibrany&lt;/li>
+&lt;li>Reviewers:&lt;/li>
+&lt;li>Date: June 2020&lt;/li>
+&lt;li>Status: Replaced with &lt;a href="/docs/blocks-storage/migrate-cortex-cluster-from-chunks-to-blocks/">migration guide&lt;/a>.&lt;/li>
+&lt;/ul>
+&lt;h2 id="warning">Warning&lt;/h2>
+&lt;p>Suggestions from this proposal were implemented, but general procedure outlined here doesn&amp;rsquo;t quite work in
+Kubernetes environment. Please see &lt;a href="/docs/blocks-storage/migrate-cortex-cluster-from-chunks-to-blocks/">chunks to blocks migration guide&lt;/a>
+instead.&lt;/p>
+&lt;h2 id="introduction">Introduction&lt;/h2>
+&lt;p>This short document describes the first step in full migration of the Cortex cluster from using chunks storage to using blocks storage, specifically switching ingesters to using blocks, and modification of queriers to query both chunks and blocks storage.&lt;/p>
+&lt;h2 id="ingesters">Ingesters&lt;/h2>
+&lt;p>When switching ingesters from chunks to blocks, we need to consider the following:&lt;/p>
+&lt;ul>
+&lt;li>Ingesting of new data, and querying should work during the switch.&lt;/li>
+&lt;li>Ingesters are rolled out with new configuration over time. There is overlap: ingesters of both kinds (chunks, blocks) are running at the same time.&lt;/li>
+&lt;li>Ingesters using WAL don’t flush in-memory chunks to storage on shutdown.&lt;/li>
+&lt;li>Rollout should be as automated as possible.&lt;/li>
+&lt;/ul>
+&lt;p>How do we handle ingesters with WAL (non-WAL ingesters are discussed below)? There are several possibilities, but the simplest option seems to be adding a new flag to ingesters to flush chunks on shutdown. This is trivial change to ingester, and allows us to do automated migration by:&lt;/p>
+&lt;ol>
+&lt;li>Enabling this flag on each ingester (first rollout).&lt;/li>
+&lt;li>Turn off chunks, enable TSDB (second rollout). During the second rollout, as the ingester shuts down, it will flush all chunks in memory, and when it restarts, it will start using TSDB.&lt;/li>
+&lt;/ol>
+&lt;p>Benefit of this approach is that it is trivial to add the flag, and then rollout in both steps can be fully automated.
+In this scenario, we will reconfigure existing statefulset of ingesters to use blocks in step 2.&lt;/p>
+&lt;p>Notice that querier can ask only ingesters for most recent data and not consult the store, but during the rollout (and some time after), ingesters that are already using blocks will &lt;strong>not&lt;/strong> have the most recent chunks in memory. To make sure queries work correctly, &lt;code>-querier.query-store-after&lt;/code> needs to be set to 0, in order for queriers to not rely on ingesters only for most recent data. After couple of hours after rollout, this value can be increased again, depending on how much data ingesters keep. (&lt;code>-experimental.blocks-storage.tsdb.retention-period&lt;/code> for blocks, &lt;code>-ingester.retain-period&lt;/code> for chunks)
+During the rollout, chunks and blocks ingesters share the ring and use the same statefulset.&lt;/p>
+&lt;p>Other alternatives considered for flushing chunks / handling WAL:&lt;/p>
+&lt;ul>
+&lt;li>Replay chunks-WAL into TSDB head on restart. In this scenario, chunks-ingester shuts down, and block ingester starts. It can detect existing chunks WAL, and replay it into TSDB head (and then delete old WAL). Issue here is that current chunks-WAL is quite specific to ingester code, and would require some refactoring to make this happen. Deployment is trivial: just reconfigure ingesters to start using blocks, and replay chunks WAL if found. Required change seems like a couple of days of coding work, but it is essentially only used once (for each cluster). Doesn&amp;rsquo;t seem like good time investment.&lt;/li>
+&lt;li>Shutdown single chunks-ingester, run flusher in its place, and when done start new blocks ingester. This is similar to the procedure we did during the introduction of WAL. Flusher can be run via initContainer support in pods. This still requires two-step deployment: 1) enable flusher and reconfigure ingesters to use blocks, 2) remove flusher.&lt;/li>
+&lt;/ul>
+&lt;p>When not using WAL, ingesters using chunks cannot transfer those chunks to new ingesters that start with blocks support, so old ingesters need to be configured to disable transfers (using &lt;code>-ingester.max-transfer-retries=0&lt;/code>), and to flush chunks on shutdown instead.
+As ingesters without WAL are typically deployed using Kubernetes deployment, while blocks ingesters need to use statefulset, and there is no chunks transfer happening, it is possible to configure and start blocks-ingesters and then stop old deployment.&lt;/p>
+&lt;p>After all ingesters are converted to blocks, we can set cut-off time for querying chunks storage on queriers.&lt;/p>
+&lt;p>For rollback from blocks to chunks, we need to be able to flush data from ingesters to the blocks storage, and then switch ingesters back to chunks.
+Ingesters are currently not able to flush blocks to storage, but adding flush-on-shutdown option, support for &lt;code>/shutdown&lt;/code> endpoint and support in flusher component similar to chunks is doable, and should be part of this work.&lt;/p>
+&lt;p>With this ability, rollback would follow the same process, just in reverse: 1) redeploy with flush flag enabled, 2a) redeploy with config change from blocks to chunks (when using WAL) or 2b) scale down statefulset with blocks-ingesters, and start deployment with chunk-ingesters again.
+Note that this isn&amp;rsquo;t a &lt;em>full&lt;/em> rollback to chunks-only solution, as generated blocks still need to be queried after the rollback, otherwise samples pushed to blocks would be missing.
+This means running store-gateways and queriers that can query both chunks and blocks store.&lt;/p>
+&lt;p>Alternative plan could be to use a separate Cortex cluster configured to use blocks, and redirect incoming traffic to both chunks and blocks cluster.
+When one is confident about the blocks cluster running correctly, old chunks cluster can be shutdown.
+In this plan, there is an overlap where both clusters are ingesting same data.
+Blocks cluster needs to be configured to be able to query chunks storage as well, with cut-off time based on when clusters were configured (at latest, to minimize amount of duplicated samples that need to be processed during queries.)&lt;/p>
+&lt;h2 id="querying">Querying&lt;/h2>
+&lt;p>To be able to query both old and new data, querier needs to be modified to be able to query both blocks (on object store only) and chunks store (NoSQL + object store) at the same time, and merge results from both.&lt;/p>
+&lt;p>For querying chunks storage, we have two options:&lt;/p>
+&lt;ul>
+&lt;li>Always query the chunks store – useful during ingesters switch, or after rollback from blocks to chunks.&lt;/li>
+&lt;li>Query chunk store only for queries that ask for data after specific cut-off time. This is useful after all ingesters have switched, and we know the timestamp since ingesters are only writing blocks.&lt;/li>
+&lt;/ul>
+&lt;p>Querier needs to support both modes of querying chunks store.
+Which one of these two modes is used depends on single timestamp flag passed to the querier.
+If timestamp is configured, chunks store is only used for queries that ask for data older than timestamp.
+If timestamp is not configured, chunks store is always queried.&lt;/p>
+&lt;p>For blocks, we don&amp;rsquo;t need to use the timestamp flag. Queriers can always query blocks – each querier knows about existing blocks and their timeranges, so it can quickly determine whether there are any blocks with relevant data.
+Always querying blocks is also useful when there is some background process converting chunks to blocks.
+As new blocks with old data appear on the store as a result of conversion, they get queried if necessary.&lt;/p>
+&lt;p>While we could use runtime-config for on-the-fly switch without restarts, queriers restart quickly and so switching via configuration or command line option seems enough.&lt;/p>
+&lt;h2 id="work-to-do">Work to do&lt;/h2>
+&lt;ul>
+&lt;li>Ingester: Add flags for always flushing on shutdown, even when using WAL or blocks.&lt;/li>
+&lt;li>Querier: Add support for querying both chunk store and blocks at the same time and test the support for querying both chunks and blocks from ingesters works correctly&lt;/li>
+&lt;li>Querier: Add cut-off time support to querier to query chunk the store only if needed, based on query time.&lt;/li>
+&lt;/ul></description></item><item><title>Docs: Scalable Query Frontend</title><link>/docs/proposals/scalable-query-frontend/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>/docs/proposals/scalable-query-frontend/</guid><description>
+&lt;ul>
+&lt;li>Author: &lt;a href="https://github.com/joe-elliott">Joe Elliott&lt;/a>&lt;/li>
+&lt;li>Date: April 2020&lt;/li>
+&lt;li>Status: Proposed&lt;/li>
+&lt;/ul>
+&lt;h2 id="overview">Overview&lt;/h2>
+&lt;p>This document aims to describe the &lt;a href="#query-frontend-role">role&lt;/a> that the Cortex Query Frontend plays in running multitenant Cortex at scale. It also describes the &lt;a href="#challenges-and-proposals">challenges&lt;/a> of horizontally scaling the query frontend component and includes several recommendations and options for creating a reliably scalable query-frontend. Finally, we conclude with a discussion of the overall philosophy of the changes and propose an &lt;a href="#alternative">alternative&lt;/a>.&lt;/p>
+&lt;p>For the original design behind the query frontend, you should read &lt;a href="https://docs.google.com/document/d/1lsvSkv0tiAMPQv-V8vI2LZ8f4i9JuTRsuPI_i-XcAqY">Cortex Query Optimisations design doc from 2018-07&lt;/a>.&lt;/p>
+&lt;h2 id="reasoning">Reasoning&lt;/h2>
+&lt;p>Query frontend scaling is becoming increasingly important for two primary reasons.&lt;/p>
+&lt;p>The Cortex team is working toward a scalable single binary solution. Recently the query-frontend was &lt;a href="https://github.com/cortexproject/cortex/pull/2437">added&lt;/a> to the Cortex single binary mode and, therefore, needs to seamlessly scale. Technically, nothing immediately breaks when scaling the query-frontend, but there are a number of concerns detailed in &lt;a href="#challenges-and-proposals">Challenges And Proposals&lt;/a>.&lt;/p>
+&lt;p>As the query-frontend continues to &lt;a href="https://github.com/cortexproject/cortex/pull/1878">support additional features&lt;/a> it will start to become a bottleneck of the system. Current wisdom is to run very few query-frontends in order to maximize &lt;a href="#tenancy-fairness">Tenancy Fairness&lt;/a> but as more features are added scaling horizontally will become necessary.&lt;/p>
+&lt;h2 id="query-frontend-role">Query Frontend Role&lt;/h2>
+&lt;h3 id="load-shedding">Load Shedding&lt;/h3>
+&lt;p>The query frontend maintains a queue per tenant of configurable length (default 100) in which it stores a series of requests from that tenant. If this queue fills up then the frontend will return 429’s thus load shedding the rest of the system.&lt;/p>
+&lt;p>This is particularly effective due to the “pull” based model in which queriers pull requests from query frontends.&lt;/p>
+&lt;h3 id="query-retries">Query Retries&lt;/h3>
+&lt;p>The query frontend is capable of retrying a query on another querier if the first should fail due to OOM or network issues.&lt;/p>
+&lt;h3 id="shardingparallelization">Sharding/Parallelization&lt;/h3>
+&lt;p>The query frontend shards requests by interval and &lt;a href="https://github.com/cortexproject/cortex/pull/1878">other factors&lt;/a> to concurrently run a single query across multiple queriers.&lt;/p>
+&lt;h3 id="query-alignmentcaching">Query Alignment/Caching&lt;/h3>
+&lt;p>Queries are aligned to their own step and then stored/retrieved from cache.&lt;/p>
+&lt;h3 id="tenancy-fairness">Tenancy Fairness&lt;/h3>
+&lt;p>By maintaining one queue per tenant, a low demand tenant will have the same opportunity to have a query serviced as a high demand tenant. See &lt;a href="#dilutes-tenant-fairness">Dilutes Tenant Fairness&lt;/a> for additional discussion.&lt;/p>
+&lt;p>For clarity, tenancy fairness only comes into play when queries are actually being queued in the query frontend. Currently this rarely occurs, but as &lt;a href="https://github.com/cortexproject/cortex/pull/1878">query sharding&lt;/a> becomes more aggressive this may become the norm.&lt;/p>
+&lt;h2 id="challenges-and-proposals">Challenges And Proposals&lt;/h2>
+&lt;h3 id="dynamic-querier-concurrency">Dynamic Querier Concurrency&lt;/h3>
+&lt;h4 id="challenge">Challenge&lt;/h4>
+&lt;p>For every query frontend the querier adds a &lt;a href="https://github.com/cortexproject/cortex/blob/50f53dba8f8bd5f62c0e85cc5d85684234cd1c1c/pkg/querier/frontend/worker.go#L146">configurable number of goroutines&lt;/a> which are each capable of executing a query. Therefore, scaling the query frontend impacts the amount of work each individual querier is attempting to do at any given time.&lt;/p>
+&lt;p>Scaling up may cause a querier to attempt more work than they are configured for due to restrictions such as memory and cpu limits. Additionally, the promql engine itself is limited in the number of queries it can do as configured by the &lt;code>-querier.max-concurrent&lt;/code> parameter. Attempting more queries concurrently than this value causes the queries to queue up in the querier itself.&lt;/p>
+&lt;p>For similar reasons scaling down the query frontend may cause a querier to not use its allocated memory and cpu effectively. This will lower effective resource utilization. Also, because individual queriers will be doing less work, this may cause increased queueing in the query frontends.&lt;/p>
+&lt;h4 id="proposal">Proposal&lt;/h4>
+&lt;p>Currently queriers are configured to have a &lt;a href="https://github.com/cortexproject/cortex/blob/50f53dba8f8bd5f62c0e85cc5d85684234cd1c1c/pkg/querier/frontend/worker.go#L146">max parallelism per query frontend&lt;/a>. An additional “total max concurrency” flag should be added.&lt;/p>
+&lt;p>Total Max Concurrency would then be evenly divided amongst all available query frontends. This would decouple the amount of work a querier is attempting to do with the number of query frontends that happen to exist at this moment. Consequently this would allow allocated resources (e.g. k8s cpu/memory limits) to remain balanced with the work the querier was attempting as the query frontend is scaled up or down.&lt;/p>
+&lt;p>A &lt;a href="https://github.com/cortexproject/cortex/pull/2456">PR&lt;/a> has already been merged to address this.&lt;/p>
+&lt;h3 id="overwhelming-promql-concurrency">Overwhelming PromQL Concurrency&lt;/h3>
+&lt;h4 id="challenge-1">Challenge&lt;/h4>
+&lt;p>If #frontends &amp;gt; promql concurrency then the queriers are incapable of devoting even a single worker to each query frontend without risking queueing in the querier. Queuing in the querier is a highly undesirable state and one of the primary reasons the query frontend was originally created.&lt;/p>
+&lt;h4 id="proposal-1">Proposal&lt;/h4>
+&lt;p>When #frontends &amp;gt; promql concurrency then each querier will maintain &lt;a href="https://github.com/cortexproject/cortex/blob/8fb86155a7c7c155b8c4d31b91b267f9631b60ba/pkg/querier/frontend/worker.go#L194-L200">exactly one connection&lt;/a> to every frontend. As the query frontend is &lt;a href="https://github.com/cortexproject/cortex/blob/8fb86155a7c7c155b8c4d31b91b267f9631b60ba/pkg/querier/frontend/frontend.go#L279-L332">currently coded&lt;/a> it will attempt to use every open GRPC connection to execute a query in the attached queriers. Therefore, in this situation where #frontends &amp;gt; promql concurrency, the querier is exposing itself to more work then it is actually configured to perform.&lt;/p>
+&lt;p>To prevent this we will add “flow control” information to the &lt;a href="https://github.com/cortexproject/cortex/blob/master/pkg/querier/frontend/frontend.proto#L21">ProcessResponse message&lt;/a> that is used to return query results from the querier to the query frontend. In an active system this message is passed multiple times per second from the queriers to the query frontends and would be a reliable way for the frontends to track the state of queriers and balance load.&lt;/p>
+&lt;p>There are a lot of options for an exact implementation of this idea. An effective solution should be determined and chosen by modeling a set of alternatives. The details of this would be included in another design doc. A simple implementation would look something like the following:&lt;/p>
+&lt;p>Add two new fields to &lt;a href="https://github.com/cortexproject/cortex/blob/master/pkg/querier/frontend/frontend.proto#L21">ProcessResponse&lt;/a>:&lt;/p>
+&lt;div class="highlight">&lt;pre style="background-color:#f8f8f8;-moz-tab-size:4;-o-tab-size:4;tab-size:4">&lt;code class="language-protobuf" data-lang="protobuf">&lt;span style="color:#204a87;font-weight:bold">message&lt;/span> &lt;span style="color:#000">ProcessResponse&lt;/span> &lt;span style="color:#000;font-weight:bold">{&lt;/span>&lt;span style="color:#a40000">
+&lt;/span>&lt;span style="color:#a40000">&lt;/span> &lt;span style="color:#000">httpgrpc.HTTPResponse&lt;/span> &lt;span style="color:#000">httpResponse&lt;/span> &lt;span style="color:#ce5c00;font-weight:bold">=&lt;/span> &lt;span style="color:#0000cf;font-weight:bold">1&lt;/span>&lt;span style="color:#000;font-weight:bold">;&lt;/span>&lt;span style="color:#a40000">
+&lt;/span>&lt;span style="color:#a40000">&lt;/span> &lt;span style="color:#000">currentConcurrency&lt;/span> &lt;span style="color:#000">int&lt;/span> &lt;span style="color:#ce5c00;font-weight:bold">=&lt;/span> &lt;span style="color:#0000cf;font-weight:bold">2&lt;/span>&lt;span style="color:#000;font-weight:bold">;&lt;/span>&lt;span style="color:#a40000">
+&lt;/span>&lt;span style="color:#a40000">&lt;/span> &lt;span style="color:#000">desiredConcurrency&lt;/span> &lt;span style="color:#000">int&lt;/span> &lt;span style="color:#ce5c00;font-weight:bold">=&lt;/span> &lt;span style="color:#0000cf;font-weight:bold">3&lt;/span>&lt;span style="color:#000;font-weight:bold">;&lt;/span>&lt;span style="color:#a40000">
+&lt;/span>&lt;span style="color:#a40000">&lt;/span>&lt;span style="color:#000;font-weight:bold">}&lt;/span>&lt;span style="color:#a40000">
+&lt;/span>&lt;/code>&lt;/pre>&lt;/div>&lt;p>&lt;strong>currentConcurrency&lt;/strong> - The current number of queries being executed by the querier.&lt;/p>
+&lt;p>&lt;strong>desiredConcurrency&lt;/strong> - The total number of queries that a querier is capable of executing.&lt;/p>
+&lt;p>Add a short backoff to the main frontend &lt;a href="https://github.com/cortexproject/cortex/blob/8fb86155a7c7c155b8c4d31b91b267f9631b60ba/pkg/querier/frontend/frontend.go#L288-L331">processing loop&lt;/a>. This would cause the frontend to briefly back off of any querier that was overloaded but continue to send queries to those that were capable of doing work.&lt;/p>
+&lt;div class="highlight">&lt;pre style="background-color:#f8f8f8;-moz-tab-size:4;-o-tab-size:4;tab-size:4">&lt;code class="language-go" data-lang="go">&lt;span style="color:#204a87;font-weight:bold">if&lt;/span> &lt;span style="color:#000">current&lt;/span> &lt;span style="color:#000;font-weight:bold">&amp;gt;&lt;/span> &lt;span style="color:#000">desired&lt;/span> &lt;span style="color:#000;font-weight:bold">{&lt;/span>
+&lt;span style="color:#000">zzz&lt;/span> &lt;span style="color:#ce5c00;font-weight:bold">:=&lt;/span> &lt;span style="color:#000;font-weight:bold">(&lt;/span>&lt;span style="color:#000">current&lt;/span> &lt;span style="color:#ce5c00;font-weight:bold">-&lt;/span> &lt;span style="color:#000">desired&lt;/span>&lt;span style="color:#000;font-weight:bold">)&lt;/span> &lt;span style="color:#ce5c00;font-weight:bold">*&lt;/span> &lt;span style="color:#000">backoffDuration&lt;/span>
+&lt;span style="color:#000">zzz&lt;/span> &lt;span style="color:#ce5c00;font-weight:bold">*=&lt;/span> &lt;span style="color:#0000cf;font-weight:bold">1&lt;/span> &lt;span style="color:#ce5c00;font-weight:bold">+&lt;/span> &lt;span style="color:#000">rand&lt;/span>&lt;span style="color:#000;font-weight:bold">.&lt;/span>&lt;span style="color:#000">Float64&lt;/span>&lt;span style="color:#000;font-weight:bold">()&lt;/span> &lt;span style="color:#ce5c00;font-weight:bold">*&lt;/span> &lt;span style="color:#0000cf;font-weight:bold">.1&lt;/span> &lt;span style="color:#8f5902;font-style:italic">// jitter
+&lt;/span>&lt;span style="color:#8f5902;font-style:italic">&lt;/span> &lt;span style="color:#000">time&lt;/span>&lt;span style="color:#000;font-weight:bold">.&lt;/span>&lt;span style="color:#000">Sleep&lt;/span>&lt;span style="color:#000;font-weight:bold">(&lt;/span>&lt;span style="color:#000">zzz&lt;/span>&lt;span style="color:#000;font-weight:bold">)&lt;/span>
+&lt;span style="color:#000;font-weight:bold">}&lt;/span>
+&lt;/code>&lt;/pre>&lt;/div>&lt;p>Passing flow control information from the querier to the frontend would also open up additional future work for more sophisticated load balancing across queriers. For example by simply comparing and choosing &lt;a href="https://www.nginx.com/blog/nginx-power-of-two-choices-load-balancing-algorithm/">the least congested of two&lt;/a> queriers we could dramatically improve how well work is distributed.&lt;/p>
+&lt;h3 id="increased-time-to-failure">Increased Time To Failure&lt;/h3>
+&lt;h4 id="challenge-2">Challenge&lt;/h4>
+&lt;p>Scaling the query frontend also increases the per tenant queue length by creating more queues. This could result in increased latencies where failing fast (429) would have been preferred.&lt;/p>
+&lt;p>The operator could reduce the queue length per query frontend in response to scaling out, but then they would run the risk of unnecessarily failing a request due to unbalanced distribution across query frontends. Also, shorter queues run the risk of failing to properly service heavily sharded queries.&lt;/p>
+&lt;p>Another concern is that a system with more queues will take longer to recover from an production event as it will have queued up more work.&lt;/p>
+&lt;h4 id="proposal-2">Proposal&lt;/h4>
+&lt;p>Currently we are not proposing any changes to alleviate this concern. We believe this is solvable operationally. This can be revisited as more information is gathered.&lt;/p>
+&lt;h3 id="querier-discovery-lag">Querier Discovery Lag&lt;/h3>
+&lt;h4 id="challenge-3">Challenge&lt;/h4>
+&lt;p>Queriers have a configurable parameter that controls how often they refresh their query frontend list. The default value is 10 seconds. After a new query frontend is added the average querier will take 5 seconds (after DNS is updated) to become aware of it and begin requesting queries from it.&lt;/p>
+&lt;h4 id="proposal-3">Proposal&lt;/h4>
+&lt;p>It is recommended to add a readiness/health check to the query frontend to prevent it from receiving queries while it is waiting for queriers to connect. HTTP health checks are supported by &lt;a href="https://www.envoyproxy.io/learn/health-check">envoy&lt;/a>, &lt;a href="https://kubernetes.io/docs/tasks/configure-pod-container/configure-liveness-readiness-startup-probes/">k8s&lt;/a>, &lt;a href="https://docs.nginx.com/nginx/admin-guide/load-balancer/http-health-check/">nginx&lt;/a>, and basically any commodity load balancer. The query frontend would not indicate healthy on its health check until at least one querier had connected.&lt;/p>
+&lt;p>In a k8s environment this will require two services. One service for discovery with &lt;code>publishNotReadyAddresses&lt;/code> set to true and one service for load balancing which honors the healthcheck/readiness probe. After a new query-frontend instance is created the &amp;ldquo;discovery service&amp;rdquo; would immediately have the ip of the new instance which would allow queriers to discover and attach to it. After queriers had connected it would then raise its readiness probe and appear on the &amp;ldquo;load balancing&amp;rdquo; service and begin receiving traffic.&lt;/p>
+&lt;h3 id="dilutes-tenant-fairness">Dilutes Tenant Fairness&lt;/h3>
+&lt;h4 id="challenge-4">Challenge&lt;/h4>
+&lt;p>Given &lt;code>f&lt;/code> query frontends, &lt;code>n&lt;/code> tenants and an average of &lt;code>q&lt;/code> queries in the frontend per tenant. The following assumes that queries are perfectly distributed across query frontends. The number of tenants per instance would be:&lt;/p>
+&lt;img src="https://render.githubusercontent.com/render/math?math=m = floor(n * \frac{min(q,f)}{f})">
+&lt;p>The chance that a query by a tenant with &lt;code>Q&lt;/code> queries in the frontend is serviced next is:&lt;/p>
+&lt;img src="https://render.githubusercontent.com/render/math?math=min(Q,f)* \frac{1}{min(q * n %2b Q,f)}*\frac{1}{m %2b 1}">
+&lt;p>Note that fewer query frontends caps the impact of the number of active queries per tenant. If there is only one query frontend then the equation reduces to:&lt;/p>
+&lt;img src="https://render.githubusercontent.com/render/math?math=\frac{1}{n}">
+&lt;p>and every tenant has an equal chance of being serviced regardless of the number of queued queries.&lt;/p>
+&lt;p>Adding more query frontends favors high volume tenants by giving them more slots to be picked up by the next available querier. Fewer query frontends allows for an even playing field regardless of the number of active queries.&lt;/p>
+&lt;p>For clarity, it should be noted that tenant fairness is only impacted if queries are being queued in the frontend. Under normal operations this is currently not occurring although this may change with increased sharding.&lt;/p>
+&lt;h4 id="proposal-4">Proposal&lt;/h4>
+&lt;p>Tenancy fairness is complex and is currently &lt;em>not&lt;/em> impacting our system. Therefore we are proposing a very simple improvement to the query frontend. If/when frontend queuing becomes more common this can be revisited as we will understand the problem better.&lt;/p>
+&lt;p>Currently the query frontend &lt;a href="https://github.com/cortexproject/cortex/blob/50f53dba8f8bd5f62c0e85cc5d85684234cd1c1c/pkg/querier/frontend/frontend.go#L362-L367">picks a random tenant&lt;/a> to service when a querier requests a new query. This can increase long tail latency if a tenant gets “unlucky” and is also exacerbated for low volume tenants by scaling the query frontend. Instead the query frontend could use a round robin approach to choose the next tenant to service. Round robin is a commonly used algorithm to increase fairness in scheduling.&lt;/p>
+&lt;p>This would be a very minor improvement, but would give some guarantees to low volume tenants that their queries would be serviced. This has been proposed in this &lt;a href="https://github.com/cortexproject/cortex/issues/2431">issue&lt;/a>.&lt;/p>
+&lt;p>&lt;strong>Pros:&lt;/strong> Requires local knowledge only. Easier to implement than weighted round robin.&lt;/p>
+&lt;p>&lt;strong>Cons:&lt;/strong> Improvement is minor.&lt;/p>
+&lt;p>&lt;strong>Alternatives to Round Robin&lt;/strong>&lt;/p>
+&lt;p>&lt;strong>Do Nothing&lt;/strong>&lt;/p>
+&lt;p>As is noted above tenancy fairness only comes into play when queries start queueing up in the query frontend. Internal Metrics for multi-tenant Cortex at Grafana show that this has only happened 5 times in the past week significantly enough to have been caught by Prometheus.&lt;/p>
+&lt;p>Right now doing nothing is a viable option that will, almost always, fairly serve our tenants. There is, however, some concern that as sharding becomes more commonplace queueing will become more common and QOS will suffer due to reasons outlined in &lt;a href="#dilutes-tenant-fairness">Dilutes Tenant Fairness&lt;/a>.&lt;/p>
+&lt;p>&lt;strong>Pros:&lt;/strong> Easy!&lt;/p>
+&lt;p>&lt;strong>Cons:&lt;/strong> Nothing happens!&lt;/p>
+&lt;p>&lt;strong>Weighted Round Robin&lt;/strong>&lt;/p>
+&lt;p>The query frontends could maintain a local record of throughput or work per tenant. Tenants could then be sorted in QOS bands. In its simplest form there would be two QOS bands. The band of low volume tenants would be serviced twice for every one time the band of high volume tenants would be serviced. The full details of this approach would require a separate proposal.&lt;/p>
+&lt;p>This solution would also open up interesting future work. For instance, we could allow operators to manually configure tenants into QOS bands.&lt;/p>
+&lt;p>&lt;strong>Pros:&lt;/strong> Requires local knowledge only. Can be extended later to allow tenants to be manually sorted into QOS tiers.&lt;/p>
+&lt;p>&lt;strong>Cons:&lt;/strong> Improvement is better than Round Robin only. Relies on even distribution of queries across frontends. Increased complexity and difficulty in reasoning about edge cases.&lt;/p>
+&lt;p>&lt;strong>Weighted Round Robin With Gossiped Traffic&lt;/strong>&lt;/p>
+&lt;p>This approach would be equivalent to Weighted Round Robin proposed above but with tenant traffic volume gossiped between query frontends.&lt;/p>
+&lt;p>&lt;strong>Pros:&lt;/strong> Benefits of Weighted Round Robin without the requirement of even query distribution. Even though it requires distributed information a failure in gossip means it gracefully degrades to Weighted Round Robin.&lt;/p>
+&lt;p>&lt;strong>Cons:&lt;/strong> Requires cross instance communication. Increased complexity and difficulty in reasoning about edge cases.&lt;/p>
+&lt;h2 id="alternative">Alternative&lt;/h2>
+&lt;p>The proposals in this document have preferred augmenting existing components to make decisions with local knowledge. The unstated goal of these proposals is to build a distributed queue across a scaled query frontend that reliably and fairly serves our tenants.&lt;/p>
+&lt;p>Overall, these proposals will create a robust system that is resistant to network partitions and failures of individual pieces. However, it will also create a complex system that could be difficult to reason about, contain hard to ascertain edge cases and nuanced failure modes.&lt;/p>
+&lt;p>The alternative is, instead of building a distributed queue, to add a new cortex queueing service that sits in between the frontends and the queriers. This queueing service would pull from the frontends and distribute to the queriers. It would decouple the stateful queue from the stateless elements of the query frontend and allow us to easily scale the query frontend while keeping the queue itself a singleton. In a single binary HA mode one (or few) of the replicas would be leader elected to serve this role.&lt;/p>
+&lt;p>Having a singleton queue is attractive because it is simple to reason about and gives us a single place to make fair cross tenant queueing decisions. It does, however, create a single point of failure and add another network hop to the query path.&lt;/p>
+&lt;h2 id="conclusion">Conclusion&lt;/h2>
+&lt;p>In this document we reviewed the &lt;a href="#query-frontend-role">reasons the frontend exists&lt;/a>, &lt;a href="#challenges-and-proposals">challenges and proposals to scaling the frontend&lt;/a> and &lt;a href="#alternative">an alternative architecture that avoids most problems but comes with its own challenges.&lt;/a>&lt;/p>
+&lt;table>
+&lt;tr>
+&lt;td>&lt;strong>Challenge&lt;/strong>
+&lt;/td>
+&lt;td>&lt;strong>Proposal&lt;/strong>
+&lt;/td>
+&lt;td>&lt;strong>Status&lt;/strong>
+&lt;/td>
+&lt;/tr>
+&lt;tr>
+&lt;td>Dynamic Querier Concurrency
+&lt;/td>
+&lt;td>Add Max Total Concurrency in Querier
+&lt;/td>
+&lt;td>&lt;a href="https://github.com/cortexproject/cortex/pull/2456">Pull Request&lt;/a>
+&lt;/td>
+&lt;/tr>
+&lt;tr>
+&lt;td>Overwhelming PromQL Concurrency
+&lt;/td>
+&lt;td>Queriers Coordinate Concurrency with Frontends
+&lt;/td>
+&lt;td>Proposed
+&lt;/td>
+&lt;/tr>
+&lt;tr>
+&lt;td>Increased Time to Failure
+&lt;/td>
+&lt;td>Operational/Configuration Issue. No Changes Proposed.
+&lt;/td>
+&lt;td>
+N/A
+&lt;/td>
+&lt;/tr>
+&lt;tr>
+&lt;td>Querier Discovery Lag
+&lt;/td>
+&lt;td>Query Frontend HTTP Health Checks
+&lt;/td>
+&lt;td>&lt;a href="https://github.com/cortexproject/cortex/pull/2733">Pull Request&lt;/a>
+&lt;/td>
+&lt;/tr>
+&lt;tr>
+&lt;td>Dilutes Tenant Fairness
+&lt;/td>
+&lt;td>Round Robin with additional alternatives proposed
+&lt;/td>
+&lt;td>&lt;a href="https://github.com/cortexproject/cortex/pull/2553">Pull Request&lt;/a>
+&lt;/td>
+&lt;/tr>
+&lt;/table></description></item><item><title>Docs: Shuffle sharding and zone awareness</title><link>/docs/proposals/shuffle-sharding-and-zone-awareness/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>/docs/proposals/shuffle-sharding-and-zone-awareness/</guid><description>
+&lt;ul>
+&lt;li>Author: @pracucci, @tomwilkie, @pstibrany&lt;/li>
+&lt;li>Reviewers:&lt;/li>
+&lt;li>Date: August 2020&lt;/li>
+&lt;li>Status: Proposed, implemented in &lt;a href="https://github.com/cortexproject/cortex/pull/3090">PR #3090&lt;/a>&lt;/li>
+&lt;/ul>
+&lt;h2 id="shuffle-sharding-and-zone-awareness">Shuffle sharding and zone awareness&lt;/h2>
+&lt;h3 id="background">Background&lt;/h3>
+&lt;p>Cortex shards the received series across all available ingesters. In a multi-tenant cluster, each tenant series are sharded across all ingesters. This allows to horizontally scale the series across the pool of ingesters but also suffers some issues:&lt;/p>
+&lt;ol>
+&lt;li>Given every tenant writes series to all ingesters, there’s no isolation between tenants - a single misbehaving tenant can affect the whole cluster.&lt;/li>
+&lt;li>Each ingester needs an open TSDB per tenant per ingester - which has significant memory overhead. The larger the number of tenants, the higher the TSDB memory overhead, regardless of the number of series stored in each TSDB.&lt;/li>
+&lt;li>Similarly, the number of uploaded blocks to the storage every 2 hours is a function of the number of TSDBs open for each ingester. A cluster with a large number of small tenants will upload a very large number of blocks to the storage, each block being very small, increasing the number of API calls against the storage bucket.&lt;/li>
+&lt;/ol>
+&lt;p>Cortex currently supports sharding a tenant to a subset of the ingesters on the write path &lt;a href="https://github.com/cortexproject/cortex/pull/1947">PR&lt;/a>, using a feature called “&lt;strong>subring&lt;/strong>”. However, the current subring implementation suffers two issues:&lt;/p>
+&lt;ol>
+&lt;li>&lt;strong>No zone awareness:&lt;/strong> it doesn’t guarantee selected instances are balanced across availability zones&lt;/li>
+&lt;li>&lt;strong>No shuffling:&lt;/strong> the implementation is based on the hash ring and it selects N consecutive instances in the ring. This means that, instead of minimizing the likelihood that two tenants share the same instances, it emphasises it. In order to provide a good isolation between tenants, we want to minimize the chances that two tenants share the same instances.&lt;/li>
+&lt;/ol>
+&lt;h3 id="goal">Goal&lt;/h3>
+&lt;p>The goal of this work is to fix “shuffling” and “zone-awareness” when building the subring for a given tenant, honoring the following properties:&lt;/p>
+&lt;ul>
+&lt;li>&lt;strong>Stability:&lt;/strong> given the same ring, the algorithm always generates the same subring for a given tenant, even across different machines&lt;/li>
+&lt;li>&lt;a href="https://en.wikipedia.org/wiki/Consistent_hashing">&lt;strong>Consistency:&lt;/strong>&lt;/a> when the ring is resized, only n/m series are remapped on average (where n is the number of series and m is the number of replicas).&lt;/li>
+&lt;li>&lt;strong>Shuffling:&lt;/strong> probabilistically and for a large enough cluster, ensure every tenant gets a different set of instances, with a reduced number of overlapping instances between two tenants to improve failure isolation.&lt;/li>
+&lt;li>&lt;strong>Zone-awareness (balanced):&lt;/strong> the subring built for each tenant contains a balanced number of instances for each availability zone. Selecting the same number of instances in each zone is an important property because we want to preserve the balance of in-memory series across ingesters. Having less replicas in one zone will mean more load per node in this zone, which is something we want to avoid.&lt;/li>
+&lt;/ul>
+&lt;h3 id="proposal">Proposal&lt;/h3>
+&lt;p>This proposal is based on &lt;a href="https://aws.amazon.com/builders-library/workload-isolation-using-shuffle-sharding/">Amazon’s Shuffle Sharding article&lt;/a> and the algorithm has been inspired by shuffle sharding implementation in the &lt;a href="https://github.com/awslabs/route53-infima/blob/master/src/main/java/com/amazonaws/services/route53/infima/SimpleSignatureShuffleSharder.java">AWS Route53 infima library&lt;/a>.&lt;/p>
+&lt;p>Given a tenant and a shard size S (number of instances to which tenant data/workload should be sharded to), we build a subring selecting N instances from each zone, where N = ceil(S / num of zones). The shard size S is required to be a multiple of the number of zones, in order to select an equal number of instances from each zone.&lt;/p>
+&lt;p>To do it, we &lt;strong>treat each zone as a separate ring&lt;/strong> and select N unique instances from each zone. The instances selection process works as follow:&lt;/p>
+&lt;ol>
+&lt;li>Generate a seed based on the tenant ID&lt;/li>
+&lt;li>Initialise a pseudo random number generator with the tenant’s seed. The random generator must guarantee predictable numbers given the same input seed.&lt;/li>
+&lt;li>Generate a sequence of N random numbers, where N is the number of instances to select from the zone. Each random number is used as a “token” to look up instances in the ring. For each random number:&lt;/li>
+&lt;li>Lookup the instance holding that token in the ring&lt;/li>
+&lt;li>If the instance has not been previously selected, then pick it&lt;/li>
+&lt;li>If the instance was previously selected (we call this a “collision”), then continue walking the ring clockwise until we find an instance which has not been selected yet&lt;/li>
+&lt;/ol>
+&lt;h3 id="guaranteed-properties">Guaranteed properties&lt;/h3>
+&lt;h4 id="stability">Stability&lt;/h4>
+&lt;p>The same tenant ID always generates the same seed. Given the same seed, the pseudo number random generator always generates the same sequence of numbers.&lt;/p>
+&lt;p>This guarantees that, given the same ring, we generate the same exact subring for a given tenant.&lt;/p>
+&lt;h4 id="consistency">Consistency&lt;/h4>
+&lt;p>The consistency property is honored by two aspects of the algorithm:&lt;/p>
+&lt;ol>
+&lt;li>The quantity of random numbers generated is always equal to the shard size S, even in case of “collisions”. A collision is when the instance holding the random token has already been picked and we need to select a different instance which has not been picked yet.&lt;/li>
+&lt;li>In case of collisions, we select the “next” instance continuing walking the ring instead of generating another random number&lt;/li>
+&lt;/ol>
+&lt;h5 id="example-adding-an-instance-to-the-ring">Example adding an instance to the ring&lt;/h5>
+&lt;p>Let’s consider an initial ring with 3 instances and 1 zone (for simplicity):&lt;/p>
+&lt;ul>
+&lt;li>I1 - Tokens: 1, 8, 15&lt;/li>
+&lt;li>I2 - Tokens: 5, 11, 19&lt;/li>
+&lt;li>I3 - Tokens: 7, 13, 21&lt;/li>
+&lt;/ul>
+&lt;p>With a replication factor = 2, the random sequence looks up:&lt;/p>
+&lt;ul>
+&lt;li>3 (I2)&lt;/li>
+&lt;li>6 (I1)&lt;/li>
+&lt;/ul>
+&lt;p>Then we add a new instance and the &lt;strong>updated ring&lt;/strong> is:&lt;/p>
+&lt;ul>
+&lt;li>I1 - Tokens: 1, 8, 15&lt;/li>
+&lt;li>I2 - Tokens: 5, 11, 19&lt;/li>
+&lt;li>I3 - Tokens: 7, 13, 21&lt;/li>
+&lt;li>I4 - Tokens: 4, 7, 17&lt;/li>
+&lt;/ul>
+&lt;p>Now, let’s compare two different algorithms to solve collisions:&lt;/p>
+&lt;ul>
+&lt;li>Using the random generator:&lt;br />
+Random sequence = 3 (&lt;strong>I4&lt;/strong>), 6 (I4 - collision), 12 (&lt;strong>I3&lt;/strong>)&lt;br />
+&lt;strong>all instances are different&lt;/strong> (I4, I3)&lt;/li>
+&lt;li>Walking the ring:&lt;br />
+Random sequence = 3 (&lt;strong>I4&lt;/strong>), 6 (I4 - collision, next is &lt;strong>I1&lt;/strong>)&lt;br />
+&lt;strong>only 1 instance is different&lt;/strong> (I4, I1)&lt;/li>
+&lt;/ul>
+&lt;h4 id="shuffling">Shuffling&lt;/h4>
+&lt;p>Unless when resolving collisions, the algorithm doesn’t walk the ring to find the next instances, but uses a sequence of random numbers. This guarantees instances are shuffled, between different tenants, when building the subring.&lt;/p>
+&lt;h4 id="zone-awareness">Zone-awareness&lt;/h4>
+&lt;p>We treat each zone as a separate ring and select an equal number of instances from each zone. This guarantees a fair balance of instances between zones.&lt;/p>
+&lt;h3 id="proof-of-concept">Proof of concept&lt;/h3>
+&lt;p>We’ve built a &lt;a href="https://github.com/cortexproject/cortex/pull/3090">reference implementation&lt;/a> of the proposed algorithm, to test the properties described above.&lt;/p>
+&lt;p>In particular, we’ve observed that the &lt;a href="https://github.com/cortexproject/cortex/pull/3090/files#diff-121ffce90aa9932f6b87ffd138e0f36aR281">actual distribution&lt;/a> of matching instances between different tenants is very close to the &lt;a href="https://docs.google.com/spreadsheets/d/1FXbiWTXi6bdERtamH-IfmpgFq1fNL4GP_KX_yJvbRi4/edit">theoretical one&lt;/a>, as well as consistency and stability properties are both honored.&lt;/p></description></item><item><title>Docs: Shuffle sharding on the read path</title><link>/docs/proposals/shuffle-sharding-on-the-read-path/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>/docs/proposals/shuffle-sharding-on-the-read-path/</guid><description>
+&lt;ul>
+&lt;li>Author: @pracucci, @tomwilkie, @pstibrany&lt;/li>
+&lt;li>Reviewers:&lt;/li>
+&lt;li>Date: August 2020&lt;/li>
+&lt;li>Status: Proposed, partially implemented&lt;/li>
+&lt;/ul>
+&lt;h2 id="background">Background&lt;/h2>
+&lt;p>Cortex currently supports sharding of tenants to a subset of the ingesters on the write path &lt;a href="https://github.com/cortexproject/cortex/pull/1947">PR&lt;/a>.&lt;/p>
+&lt;p>This feature is called “subring”, because it computes a subset of nodes registered to the hash ring. The aim of this feature is to improve isolation between tenants and reduce the number of tenants impacted by an outage.&lt;/p>
+&lt;p>This approach is similar to the techniques described in &lt;a href="https://aws.amazon.com/builders-library/workload-isolation-using-shuffle-sharding/">Amazon’s Shuffle Sharding article&lt;/a>, but currently suffers from a non random selection of nodes (&lt;em>proposed solution below&lt;/em>).&lt;/p>
+&lt;p>Cortex can be &lt;strong>configured&lt;/strong> with a default subring size, and then it can be &lt;a href="https://cortexmetrics.io/docs/configuration/configuration-file/#limits_config">customized on a per-tenant basis&lt;/a>. The per-tenant configuration is live reloaded during runtime and applied without restarting the Cortex process.&lt;/p>
+&lt;p>The subring sharding currently supports only the write-path. The read-path is not shuffle sharding aware. For example, an outage of more than one ingester with RF=3 will affect all tenants, or a particularly noisy tenant wrt queries has the ability to affect all tenants.&lt;/p>
+&lt;h2 id="goals">Goals&lt;/h2>
+&lt;p>The Cortex &lt;strong>read path should support shuffle sharding to isolate&lt;/strong> the impact of an outage in the cluster. The shard size must be dynamically configurable on a per-tenant basis during runtime.&lt;/p>
+&lt;p>This deliverable involves introducing shuffle sharding in:&lt;/p>
+&lt;ul>
+&lt;li>&lt;strong>Query-frontend → Querier&lt;/strong> (for queries sharding) &lt;a href="https://github.com/cortexproject/cortex/pull/3113">PR #3113&lt;/a>&lt;/li>
+&lt;li>&lt;strong>Querier → Store-gateway&lt;/strong> (for blocks sharding) &lt;a href="https://github.com/cortexproject/cortex/pull/3069">PR #3069&lt;/a>&lt;/li>
+&lt;li>&lt;strong>Querier→ Ingesters&lt;/strong> (for queries on recent data)&lt;/li>
+&lt;li>&lt;strong>Ruler&lt;/strong> (for rule and alert evaluation)&lt;/li>
+&lt;/ul>
+&lt;h3 id="prerequisite-fix-subring-shuffling">Prerequisite: fix subring shuffling&lt;/h3>
+&lt;p>The solution is implemented in &lt;a href="https://github.com/cortexproject/cortex/pull/3090">https://github.com/cortexproject/cortex/pull/3090&lt;/a>.&lt;/p>
+&lt;h4 id="the-problem">The problem&lt;/h4>
+&lt;p>The subring is a subset of nodes that should be used for a specific tenant.&lt;/p>
+&lt;p>The current subring implementation doesn’t shuffle tenants across nodes. Given a tenant ID, it finds the first node owning the hash(tenant ID) token and then it picks N distinct consecutive nodes walking the ring clockwise.&lt;/p>
+&lt;p>For example, in a cluster with 6 nodes (numbered 1-6) and a replication factor of 3, three tenants (A, B, C) could have the following shards:&lt;/p>
+&lt;table>
+&lt;thead>
+&lt;tr>
+&lt;th>Tenant ID&lt;/th>
+&lt;th>Node 1&lt;/th>
+&lt;th>Node 2&lt;/th>
+&lt;th>Node 3&lt;/th>
+&lt;th>Node 4&lt;/th>
+&lt;th>Node 5&lt;/th>
+&lt;th>Node 6&lt;/th>
+&lt;/tr>
+&lt;/thead>
+&lt;tbody>
+&lt;tr>
+&lt;td>A&lt;/td>
+&lt;td>x&lt;/td>
+&lt;td>x&lt;/td>
+&lt;td>x&lt;/td>
+&lt;td>&lt;/td>
+&lt;td>&lt;/td>
+&lt;td>&lt;/td>
+&lt;/tr>
+&lt;tr>
+&lt;td>B&lt;/td>
+&lt;td>&lt;/td>
+&lt;td>x&lt;/td>
+&lt;td>x&lt;/td>
+&lt;td>x&lt;/td>
+&lt;td>&lt;/td>
+&lt;td>&lt;/td>
+&lt;/tr>
+&lt;tr>
+&lt;td>C&lt;/td>
+&lt;td>&lt;/td>
+&lt;td>&lt;/td>
+&lt;td>x&lt;/td>
+&lt;td>x&lt;/td>
+&lt;td>x&lt;/td>
+&lt;td>&lt;/td>
+&lt;/tr>
+&lt;/tbody>
+&lt;/table>
+&lt;h4 id="proposal">Proposal&lt;/h4>
+&lt;p>We propose to build the subring picking N distinct and random nodes registered in the ring, using the following algorithm:&lt;/p>
+&lt;ol>
+&lt;li>SID = tenant ID&lt;/li>
+&lt;li>SID = hash(SID)&lt;/li>
+&lt;li>Look for the node owning the token range containing FNV-1a(SID)&lt;/li>
+&lt;li>Loop to (2) until we’ve found N distinct nodes (where N is the shard size)&lt;/li>
+&lt;/ol>
+&lt;p>&lt;em>hash() function to be decided. The required property is to be strong enough to not generate loops across multiple subsequent hashing of the previous hash.&lt;/em>&lt;/p>
+&lt;h3 id="query-frontend--queriers-shuffle-sharding">Query-frontend → Queriers shuffle sharding&lt;/h3>
+&lt;p>Implemented in &lt;a href="https://github.com/cortexproject/cortex/pull/3113">https://github.com/cortexproject/cortex/pull/3113&lt;/a>.&lt;/p>
+&lt;h3 id="how-querier-runs-query-frontend-jobs">How querier runs query-frontend jobs&lt;/h3>
+&lt;p>Today &lt;strong>each&lt;/strong> querier connects to &lt;strong>each&lt;/strong> query-frontend instance, and calls a single “Process” method via gRPC.&lt;/p>
+&lt;p>“Process” is a bi-directional streaming gRPC method – using the server-to-client stream for sending requests from query-frontend to the querier, and client-to-server stream for returning results from querier to the query-frontend. NB this is the opposite of what might be considered normal. Query-frontend scans all its queues with pending query requests, and picks a query to execute based on a fair schedule between tenants.&lt;/p>
+&lt;p>The query request is then sent to an idle querier worker over the stream opened in the Process method, and the query-frontend then waits for a response from querier. This loop repeats until querier disconnects.&lt;/p>
+&lt;h3 id="proposal-1">Proposal&lt;/h3>
+&lt;p>To support shuffle sharding, Query-Frontends will keep a list of connected Queriers, and randomly (but consistently between query-frontends) choose N of them to distribute requests to. When Query-Frontend looks for the next request to send to a given querier, it will only consider tenants that “belong” to the Querier.&lt;/p>
+&lt;p>To choose N Queriers for a tenant, we propose to use a simple algorithm:&lt;/p>
+&lt;ol>
+&lt;li>Sort all Queriers by their ID&lt;/li>
+&lt;li>SID = tenant ID&lt;/li>
+&lt;li>SID = hash(SID)&lt;/li>
+&lt;li>Pick the querier from the list of sorted queries with:&lt;br />
+index = FNV-1a(SID) % number of Queriers&lt;/li>
+&lt;li>Loop to (3) until we’ve found N distinct queriers (where N is the shard size) and stop early if there aren’t enough queriers&lt;/li>
+&lt;/ol>
+&lt;p>&lt;em>hash() function to be decided. The required property is to be strong enough to not generate loops across multiple subsequent hashing of the previous hash.&lt;/em>&lt;/p>
+&lt;h3 id="properties">Properties&lt;/h3>
+&lt;ul>
+&lt;li>&lt;strong>Stability:&lt;/strong> this will produce the same result on all query-frontends as long as all queriers are connected to all query-frontends.&lt;/li>
+&lt;li>&lt;strong>Simplicity:&lt;/strong> no external dependencies.&lt;/li>
+&lt;li>&lt;strong>No consistent hashing:&lt;/strong> adding/removing queriers will cause “resharding” of tenants between queriers. While in general that’s not desirable property, queriers are stateless so it doesn’t seem to matter in this case.&lt;/li>
+&lt;/ul>
+&lt;h3 id="implementation-notes">Implementation notes&lt;/h3>
+&lt;ul>
+&lt;li>&lt;strong>Caching:&lt;/strong> once this list of queriers to use for a tenant is computed in the query-frontend, it is cached in memory until queriers are added or removed. Per-tenant cache entries will have a TTL to discard tenants not “seen” since a while.&lt;/li>
+&lt;li>&lt;strong>Querier ID:&lt;/strong> Query-frontends currently don’t have any identity for queriers. We need to introduce sending of a unique ID (eg. hostname) by querier to query-frontend when it calls “Process” method.&lt;/li>
+&lt;li>&lt;strong>Backward-compatibility:&lt;/strong> when querier shuffle sharding is enabled, the system expects that both query-frontend and querier will run a compatible version. Cluster version upgrade will require to rollout new query-frontends and queriers first, and then enable shuffle sharding.&lt;/li>
+&lt;li>&lt;strong>UI:&lt;/strong> we propose to expose the current state of the query-frontend through a new endpoint which should display:
+&lt;ul>
+&lt;li>Which querier are connected to the query-frontend&lt;/li>
+&lt;li>Are there any “old” queriers, that are receiving requests from all tenants?&lt;/li>
+&lt;li>Mapping of tenants to queriers. Note that this mapping may only be available for tenants with pending requests on given query-frontend, and therefore be very dynamic.&lt;/li>
+&lt;/ul>
+&lt;/li>
+&lt;/ul>
+&lt;h3 id="configuration">Configuration&lt;/h3>
+&lt;ul>
+&lt;li>&lt;strong>Shard size&lt;/strong> will be configurable on a per-tenant basis via existing “runtime-configuration” mechanism (limits overrides). Changing a value for a tenant needs to invalidate cached per-tenant queriers.&lt;/li>
+&lt;li>Queriers shard size will be a different setting than then one used for writes.&lt;/li>
+&lt;/ul>
+&lt;h3 id="evaluated-alternatives">Evaluated alternatives&lt;/h3>
+&lt;h4 id="use-the-subring">Use the subring&lt;/h4>
+&lt;p>An alternative option would be using the subring. This implies having queriers registering to the hash ring and query-frontend instances using the ring client to find the queriers subring for each tenant.&lt;/p>
+&lt;p>This solution looks adding more complexity without any actual benefit.&lt;/p>
+&lt;h4 id="change-query-frontend--querier-architecture">Change query-frontend → querier architecture&lt;/h4>
+&lt;p>Completely different approach would be to introduce a place where starting queriers would register (eg. DNS-based service discovery), and let query-frontends discover queriers from this central registry.&lt;/p>
+&lt;p>Possible benefit would be that queriers don’t need to initiate connection to all query-frontends, but query-frontends would only connect to queriers for which they have actual pending requests. However this would be a significant redesign of how query-frontend / querier communication works.&lt;/p>
+&lt;h2 id="querier--store-gateway-shuffle-sharding">Querier → Store-gateway shuffle sharding&lt;/h2>
+&lt;p>Implemented in &lt;a href="https://github.com/cortexproject/cortex/pull/3069">https://github.com/cortexproject/cortex/pull/3069&lt;/a>.&lt;/p>
+&lt;h3 id="introduction">Introduction&lt;/h3>
+&lt;p>As of today, the store-gateway supports blocks sharding with customizable replication factor (defaults to 3). Blocks of a single tenant are sharded across all store-gateway instances and so to execute a query the querier may touch any store-gateway in the cluster.&lt;/p>
+&lt;p>The current sharding implementation is based on a &lt;strong>hash ring&lt;/strong> formed by store-gateway instances.&lt;/p>
+&lt;h3 id="proposal-2">Proposal&lt;/h3>
+&lt;p>The proposed solution to add shuffle sharding support to the store-gateway is to &lt;strong>leverage on the existing hash ring&lt;/strong> to build a per-tenant &lt;strong>subring&lt;/strong>, which is then used both by the querier and store-gateway to know to which store-gateway a block belongs to.&lt;/p>
+&lt;h3 id="configuration-1">Configuration&lt;/h3>
+&lt;ul>
+&lt;li>Shuffle sharding can be enabled in the &lt;strong>store-gateway configuration.&lt;/strong> It supports a &lt;strong>default sharding factor,&lt;/strong> which is &lt;strong>overridable on a per-tenant basis&lt;/strong> and live reloaded during runtime (using the existing limits config).&lt;/li>
+&lt;li>The querier already requires the store-gateway configuration when the blocks sharding is enabled. Similarly, when shuffle sharding is enabled the querier will require the store-gateway shuffle sharding configuration as well.&lt;/li>
+&lt;/ul>
+&lt;h3 id="implementation-notes-1">Implementation notes&lt;/h3>
+&lt;p>When shuffle sharding is enabled:&lt;/p>
+&lt;ul>
+&lt;li>The &lt;strong>store-gateway&lt;/strong> &lt;code>syncUsersBlocks()&lt;/code> will build a tenant’s subring for each tenant found scanning the bucket and will skip any tenant not belonging to its shard.&lt;br />
+Likewise, ShardingMetadataFilter will first build a &lt;strong>tenant’s subring&lt;/strong> and then will use the existing logic to filter out blocks not belonging to store-gateway instance itself. The tenant ID can be read from the block’s meta.json.&lt;/li>
+&lt;li>The &lt;strong>querier&lt;/strong> &lt;code>blocksStoreReplicationSet.GetClientsFor()&lt;/code> will first build a &lt;strong>tenant’s subring&lt;/strong> and then will use the existing logic to find out to which store-gateway instance each requested block belongs to.&lt;/li>
+&lt;/ul>
+&lt;h3 id="evaluated-alternatives-1">Evaluated alternatives&lt;/h3>
+&lt;p>&lt;em>Given the store-gateways already form a ring and building the shuffle sharding based on the ring (like in the write path) doesn’t introduce extra operational complexity, we haven’t discussed alternatives.&lt;/em>&lt;/p>
+&lt;h2 id="querier-ingesters-shuffle-sharding">Querier→ Ingesters shuffle sharding&lt;/h2>
+&lt;p>We’re currently discussing/evaluating different options.&lt;/p>
+&lt;h3 id="problem">Problem&lt;/h3>
+&lt;p>Cortex must guarantee query correctness; transiently incorrect results may be cached and returned forever. The main problem to solve when introducing ingesters shuffle sharding on the read path is to make sure that a querier fetch data from all ingesters having at least 1 sample for a given tenant.&lt;/p>
+&lt;p>The problem to solve is: how can a querier efficiently find which ingesters have data for a given tenant? Each option must consider the changing of the set of ingesters and the changing of each tenant’s subring size.&lt;/p>
+&lt;h3 id="proposal-use-only-the-information-contained-in-the-ring">Proposal: use only the information contained in the ring.&lt;/h3>
+&lt;p>&lt;em>This section describes an alternative approach. Discussion is still on-going.&lt;/em>&lt;/p>
+&lt;p>The idea is for the queries to be able to deduce what ingesters could possibly hold data for a given tenant by just consulting the ring (and the per-tenant sub ring sizes). We posit that this is possible with only a single piece of extra information: a single timestamp per ingester saying when the ingester first joined the ring.&lt;/p>
+&lt;h4 id="scenario-ingester-scale-up">Scenario: ingester scale up&lt;/h4>
+&lt;p>When a new ingester is added to the ring, there will be a set of user subrings that see a change: an ingester being removed, and a new one being added. We need to guarantee that for some time period (the block flush interval), the ingester removed is also consulted for queries.&lt;/p>
+&lt;p>To do this, during the subring selection if we encounters an ingester added within the time period, we will add this to the subring but continue node selection as before - in effect, selecting an extra ingester:&lt;/p>
+&lt;div class="highlight">&lt;pre style="background-color:#f8f8f8;-moz-tab-size:4;-o-tab-size:4;tab-size:4">&lt;code class="language-go" data-lang="go">&lt;span style="color:#204a87;font-weight:bold">var&lt;/span> &lt;span style="color:#000;font-weight:bold">(&lt;/span>
+&lt;span style="color:#000">subringSize&lt;/span> &lt;span style="color:#204a87;font-weight:bold">int&lt;/span>
+&lt;span style="color:#000">selectedNodes&lt;/span> &lt;span style="color:#000;font-weight:bold">[]&lt;/span>&lt;span style="color:#000">Node&lt;/span>
+&lt;span style="color:#000">deadline&lt;/span> &lt;span style="color:#000;font-weight:bold">=&lt;/span> &lt;span style="color:#000">time&lt;/span>&lt;span style="color:#000;font-weight:bold">.&lt;/span>&lt;span style="color:#000">Now&lt;/span>&lt;span style="color:#000;font-weight:bold">().&lt;/span>&lt;span style="color:#000">Add&lt;/span>&lt;span style="color:#000;font-weight:bold">(&lt;/span>&lt;span style="color:#ce5c00;font-weight:bold">-&lt;/span>&lt;span style="color:#000">flushWindow&lt;/span>&lt;span style="color:#000;font-weight:bold">)&lt;/span>
+&lt;span style="color:#000;font-weight:bold">)&lt;/span>
+&lt;span style="color:#204a87;font-weight:bold">for&lt;/span> &lt;span style="color:#204a87">len&lt;/span>&lt;span style="color:#000;font-weight:bold">(&lt;/span>&lt;span style="color:#000">selectedNodes&lt;/span>&lt;span style="color:#000;font-weight:bold">)&lt;/span> &lt;span style="color:#000;font-weight:bold">&amp;lt;&lt;/span> &lt;span style="color:#000">subringSize&lt;/span> &lt;span style="color:#000;font-weight:bold">{&lt;/span>
+&lt;span style="color:#000">token&lt;/span> &lt;span style="color:#ce5c00;font-weight:bold">:=&lt;/span> &lt;span style="color:#000">random&lt;/span>&lt;span style="color:#000;font-weight:bold">.&lt;/span>&lt;span style="color:#000">Next&lt;/span>&lt;span style="color:#000;font-weight:bold">()&lt;/span>
+&lt;span style="color:#000">node&lt;/span> &lt;span style="color:#ce5c00;font-weight:bold">:=&lt;/span> &lt;span style="color:#000">getNodeByToken&lt;/span>&lt;span style="color:#000;font-weight:bold">(&lt;/span>&lt;span style="color:#000">token&lt;/span>&lt;span style="color:#000;font-weight:bold">)&lt;/span>
+&lt;span style="color:#204a87;font-weight:bold">for&lt;/span> &lt;span style="color:#000;font-weight:bold">{&lt;/span>
+&lt;span style="color:#204a87;font-weight:bold">if&lt;/span> &lt;span style="color:#000">node&lt;/span> &lt;span style="color:#000">in&lt;/span> &lt;span style="color:#000">selectedNodes&lt;/span> &lt;span style="color:#000;font-weight:bold">{&lt;/span>
+&lt;span style="color:#000">node&lt;/span> &lt;span style="color:#000;font-weight:bold">=&lt;/span> &lt;span style="color:#000">node&lt;/span>&lt;span style="color:#000;font-weight:bold">.&lt;/span>&lt;span style="color:#000">Next&lt;/span>&lt;span style="color:#000;font-weight:bold">()&lt;/span>
+&lt;span style="color:#204a87;font-weight:bold">continue&lt;/span>
+&lt;span style="color:#000;font-weight:bold">}&lt;/span>
+&lt;span style="color:#204a87;font-weight:bold">if&lt;/span> &lt;span style="color:#000">node&lt;/span>&lt;span style="color:#000;font-weight:bold">.&lt;/span>&lt;span style="color:#000">Added&lt;/span>&lt;span style="color:#000;font-weight:bold">.&lt;/span>&lt;span style="color:#000">After&lt;/span>&lt;span style="color:#000;font-weight:bold">(&lt;/span>&lt;span style="color:#000">deadline&lt;/span>&lt;span style="color:#000;font-weight:bold">)&lt;/span> &lt;span style="color:#000;font-weight:bold">{&lt;/span>
+&lt;span style="color:#000">subringSize&lt;/span>&lt;span style="color:#ce5c00;font-weight:bold">++&lt;/span>
+&lt;span style="color:#000">selectedNodes&lt;/span>&lt;span style="color:#000;font-weight:bold">.&lt;/span>&lt;span style="color:#000">Add&lt;/span>&lt;span style="color:#000;font-weight:bold">(&lt;/span>&lt;span style="color:#000">node&lt;/span>&lt;span style="color:#000;font-weight:bold">)&lt;/span>
+&lt;span style="color:#000">node&lt;/span> &lt;span style="color:#000;font-weight:bold">=&lt;/span> &lt;span style="color:#000">node&lt;/span>&lt;span style="color:#000;font-weight:bold">.&lt;/span>&lt;span style="color:#000">Next&lt;/span>&lt;span style="color:#000;font-weight:bold">()&lt;/span>
+&lt;span style="color:#204a87;font-weight:bold">continue&lt;/span>
+&lt;span style="color:#000;font-weight:bold">)&lt;/span>
+&lt;span style="color:#000">selectedNodes&lt;/span>&lt;span style="color:#000;font-weight:bold">.&lt;/span>&lt;span style="color:#000">Add&lt;/span>&lt;span style="color:#000;font-weight:bold">(&lt;/span>&lt;span style="color:#000">node&lt;/span>&lt;span style="color:#000;font-weight:bold">)&lt;/span>
+&lt;span style="color:#204a87;font-weight:bold">break&lt;/span>
+&lt;span style="color:#000;font-weight:bold">)&lt;/span>
+&lt;span style="color:#000;font-weight:bold">}&lt;/span>
+&lt;/code>&lt;/pre>&lt;/div>&lt;h4 id="scenario-ingester-scale-down">Scenario: ingester scale down&lt;/h4>
+&lt;p>When an ingester is permanently removed from the ring it will flush its data to the object store and the subrings containing the removed ingester will gain a “new” ingester. Queries consult the store and merge the results with those from the ingesters, so no data will be missed.&lt;/p>
+&lt;p>Queriers and store-gateways will discover newly flushed blocks on next sync (&lt;code>-blocks-storage.bucket-store.sync-interval&lt;/code>, default 5 minutes).
+Multiple ingesters should not be scaled-down within this interval.&lt;/p>
+&lt;p>To improve read-performance, queriers and rulers are usually configured with non-zero value of &lt;code>-querier.query-store-after&lt;/code> option.
+This option makes queriers and rulers to consult &lt;strong>only&lt;/strong> ingesters when running queries within specified time window (eg. 12h).
+During scale-down this needs to be lowered in order to let queriers and rulers use flushed blocks from the storage.&lt;/p>
+&lt;h4 id="scenario-increase-size-of-a-tenants-subring">Scenario: increase size of a tenant’s subring&lt;/h4>
+&lt;p>Node selection for subrings is stable - increasing the size of a subring is guaranteed to only add new nodes to it (and not remove any nodes). Hence, if a tenant’s subring is increase in size the queriers will notice the config change and start consulting the new ingester.&lt;/p>
+&lt;h4 id="scenario-decreasing-size-of-a-tenants-subring">Scenario: decreasing size of a tenant’s subring&lt;/h4>
+&lt;p>If a tenant’s subring decreases in size, there is currently no way for the queriers to know how big the ring was previously, and hence they will potentially miss an ingester with data for that tenant.&lt;/p>
+&lt;p>This is deemed an infrequent operation that we considered banning, but have a proposal for how we might make it possible:&lt;/p>
+&lt;p>The proposal is to have separate read subring and write subring size in the config. The read subring will not be allowed to be smaller than the write subring. When reducing the size of a tenant’s subring, operators must first reduce the write subring, and then two hours later when the blocks have been flushed, the read subring. In the majority of cases the read subring will not need to be specified, as it will default to the write subring size.&lt;/p>
+&lt;h3 id="considered-alternative-1-ingesters-expose-list-of-tenants">Considered alternative #1: Ingesters expose list of tenants&lt;/h3>
+&lt;p>A possible solution could be keeping in the querier an in-memory data structure to map each ingester to the list of tenants for which it has some data. This data structure would be constructed at querier startup, and then periodically updated, interpolating two information:&lt;/p>
+&lt;ol>
+&lt;li>The current state of the ring&lt;/li>
+&lt;li>The list of tenants directly exposed by each ingester (via a dedicated gRPC call)&lt;/li>
+&lt;/ol>
+&lt;h4 id="scenario-new-querier-starts-up">Scenario: new querier starts up&lt;/h4>
+&lt;p>When a querier starts up and before getting ready:&lt;/p>
+&lt;ol>
+&lt;li>It scans all ingesters (discovered via the ring) and fetches the list of tenants for which each ingester has some data&lt;/li>
+&lt;li>For each found tenant (unique list of tenant IDs across all ingesters responses), the querier looks at the current state of the ring and adds to the map the list of ingesters currently assigned to the tenant shard, even if they don’t hold any data yet (because may start receiving series shortly)&lt;/li>
+&lt;/ol>
+&lt;p>Then the querier watches the ingester ring and rebuilds the in-memory map whenever the ring topology changes.&lt;/p>
+&lt;h4 id="scenario-querier-receives-a-query-for-an-unknown-tenant">Scenario: querier receives a query for an unknown tenant&lt;/h4>
+&lt;p>A new tenant starts remote writing to the cluster. The querier doesn’t know it in its in-memory map, so it adds the tenant on the fly to the map just looking at the current state of the ring.&lt;/p>
+&lt;h4 id="scenario-ingester-scale-up--down">Scenario: ingester scale up / down&lt;/h4>
+&lt;p>When a new ingester is added / removed to / from the ring, the ring topology changes and queriers will update the in-memory map.&lt;/p>
+&lt;h4 id="scenario-per-tenant-shard-size-increases">Scenario: per-tenant shard size increases&lt;/h4>
+&lt;p>Queriers periodically (every 1m) reload the limits config file. When a tenant shard size change is detected, the querier updates the in-memory map for the affected tenant.&lt;/p>
+&lt;p>&lt;strong>Issue:&lt;/strong> some time series data may be missing in queries up to 1m.&lt;/p>
+&lt;h4 id="edge-case-queriers-notice-the-ring-topology-change-before-distributors">Edge case: queriers notice the ring topology change before distributors&lt;/h4>
+&lt;p>Consider the following scenario:&lt;/p>
+&lt;ol>
+&lt;li>Tenant A shard is composed by ingesters 1,2,3,4,5,6&lt;/li>
+&lt;li>Tenant A is remote writing 1 single series and gets replicated to ingester 1,2,3&lt;/li>
+&lt;li>The ring topology changes and tenant A shard is ingesters 1,2,3,7,8,9&lt;/li>
+&lt;li>Querier notices the ring topology change and updates the in-memory map. Given tenant A series were only on ingester 1,2,3, the querier maps tenant A to ingester 1,2,3 (because of what received from ingesters via gRPC) and 7,8,9 (because of the current state of the ring)&lt;/li>
+&lt;li>Distributor hasn’t updated the ring state yet&lt;/li>
+&lt;li>Tenant A remote writes 1 &lt;strong>new&lt;/strong> series, which get replicated to 4,5,6&lt;/li>
+&lt;li>Distributor updates the ring state&lt;/li>
+&lt;li>&lt;strong>Race condition:&lt;/strong> querier will not know that ingesters 4,5,6 contains tenant A data until the next sync&lt;/li>
+&lt;/ol>
+&lt;h3 id="considered-alternative-2-streaming-updates-from-ingesters-to-queriers">Considered alternative #2: streaming updates from ingesters to queriers&lt;/h3>
+&lt;p>&lt;em>This section describes an alternative approach.&lt;/em>&lt;/p>
+&lt;h4 id="current-state">Current state&lt;/h4>
+&lt;p>As of today, queriers discover ingesters via the ring:&lt;/p>
+&lt;ul>
+&lt;li>&lt;strong>Ingesters&lt;/strong> register (and update their heartbeat timestamp) to the ring and queriers watch the ring, keeping an in-memory copy of the latest ingesters ring state.&lt;/li>
+&lt;li>&lt;strong>Queriers&lt;/strong> use the in-memory ring state to discover all ingesters that should be queried at query time.&lt;/li>
+&lt;/ul>
+&lt;h4 id="proposal-3">Proposal&lt;/h4>
+&lt;p>The proposal is to expose a new gRPC endpoint on ingesters, which allows queriers to receive a stream of real time updates from ingesters about the tenants for which an ingester currently has time series data.&lt;/p>
+&lt;p>From the querier side:&lt;/p>
+&lt;ul>
+&lt;li>At &lt;strong>startup&lt;/strong> the querier discovers all existing ingesters. For each ingester, the querier calls the ingester’s gRPC endpoint WatchTenants() (to be created). As soon as the WatchTenants() rpc is called, the ingester sends the entire set of tenants to the querier and then will send incremental updates (tenant added or removed from ingester) while the WatchTenants() stream connection is alive.&lt;/li>
+&lt;li>If the querier &lt;strong>loses the connection&lt;/strong> to an ingester, it will automatically retry (with backoff) while the ingester is within the ring.&lt;/li>
+&lt;li>The querier &lt;strong>watches the ring&lt;/strong> to discover added/removed ingesters. When an ingester is added, the querier adds the ingester to the pool of ingesters whose state should be monitored via WatchTenants().&lt;/li>
+&lt;li>At &lt;strong>query time,&lt;/strong> the querier looks for all ingesters within the ring. There are two options:
+&lt;ol>
+&lt;li>The querier knows the state of the ingester: the ingester will be queried only if it contains data for the query’s tenant.&lt;/li>
+&lt;li>The querier doesn’t know the state of the ingester (eg. because it was just registered to the ring and WatchTenants() hasn’t succeeded yet): the ingester will be queried anyway (correctness first).&lt;/li>
+&lt;/ol>
+&lt;/li>
+&lt;li>The querier will fine tune &lt;a href="https://godoc.org/google.golang.org/grpc/keepalive">gRPC keepalive&lt;/a> settings to ensure a lost connection between the querier and ingester will be early detected and retried.&lt;/li>
+&lt;/ul>
+&lt;h4 id="trade-offs">Trade-offs&lt;/h4>
+&lt;p>Pros:&lt;/p>
+&lt;ul>
+&lt;li>The querier logic, used to find ingesters for a tenant’s shard, &lt;strong>does not require to watch the overrides&lt;/strong> config file (containing tenant shard size override). Watching the file in the querier is problematic because of introduced delays (ConfigMap update and Cortex file polling) which could lead to distributors apply changes before queriers.&lt;/li>
+&lt;li>The querier &lt;strong>never uses the current state of the ring&lt;/strong> as a source of information to detect which ingesters have data for a specific tenant. This information comes directly from the ingesters themselves, which makes the implementation less likely to be subject to race conditions.&lt;/li>
+&lt;/ul>
+&lt;p>Cons:&lt;/p>
+&lt;ul>
+&lt;li>Each querier needs to open a gRPC connection to each ingester. Given gRPC supports multiplexing, the underlying TCP connection could be the same connection used to fetch samples from ingesters at query time, basically having 1 single TCP connection between a querier and an ingester.&lt;/li>
+&lt;li>The “Edge case: queriers notice the ring topology change before distributors” described in attempt #1 can still happen in case of delays in the propagation of the state update from an ingester to queriers:
+&lt;ul>
+&lt;li>Short delay: a short delay (few seconds) shouldn’t be a real problem. From the final user perspective, there’s no real difference between this edge case and a delay of few seconds in the ingestion path (eg. Prometheus remote write lagging behind few seconds). In the real case of Prometheus remote writing to Cortex, there’s no easy way to know if the latest samples are missing because has not been remote written yet by Prometheus or any delay in the propagation of this information between ingesters and queriers.&lt;/li>
+&lt;li>Long delay: in case of networking issue propagating the state update from an ingester to the querier, the gRPC keepalive will trigger (because of failed ping-pong) and the querier will remove the failing ingesters in-memory data, so the ingester will be always tried by the querier for any query, until the state update will be re-established.&lt;/li>
+&lt;/ul>
+&lt;/li>
+&lt;/ul>
+&lt;h2 id="ruler-sharding">Ruler sharding&lt;/h2>
+&lt;h3 id="introduction-1">Introduction&lt;/h3>
+&lt;p>The ruler currently supports rule groups sharding across a pool of rulers. When sharding is enabled, rulers form a hash ring and each ruler uses the ring to check if it should evaluate a specific rule group.&lt;/p>
+&lt;p>At a polling interval (defaults to 1 minute), the ruler:&lt;/p>
+&lt;ul>
+&lt;li>List all the bucket objects to find all rule groups (listing is done specifying an empty delimiter so it return objects at any depth)&lt;/li>
+&lt;li>For each discovered rule group, the ruler hashes the object key and checks if it belongs to the range of tokens assigned to the ruler itself. If not, the rule group is discarded, otherwise it’s kept for evaluation.&lt;/li>
+&lt;/ul>
+&lt;h3 id="proposal-4">Proposal&lt;/h3>
+&lt;p>We propose to introduce shuffle sharding in the ruler as well, leveraging on the already existing hash ring used by the current sharding implementation.&lt;/p>
+&lt;p>The &lt;strong>configuration&lt;/strong> will be extended to allow to configure:&lt;/p>
+&lt;ul>
+&lt;li>Enable/disable shuffle sharding&lt;/li>
+&lt;li>Default shard size&lt;/li>
+&lt;li>Per-tenant overrides (reloaded at runtime)&lt;/li>
+&lt;/ul>
+&lt;p>When shuffle sharding is enabled:&lt;/p>
+&lt;ul>
+&lt;li>The ruler lists (ListBucketV2) the tenants for which rule groups are stored in the bucket&lt;/li>
+&lt;li>The ruler filters out tenants not belonging to its shard&lt;/li>
+&lt;li>For each tenant belonging to its shard, the ruler does a ListBucketV2 call with the “&lt;tenant-id>/” prefix and with empty delimiter to find all the rule groups, which are then evaluated in the ruler&lt;/li>
+&lt;/ul>
+&lt;p>The ruler re-syncs the rule groups from the bucket whenever one of the following conditions happen:&lt;/p>
+&lt;ol>
+&lt;li>Periodic interval (configurable)&lt;/li>
+&lt;li>Ring topology changes&lt;/li>
+&lt;li>The configured shard size of a tenant has changed&lt;/li>
+&lt;/ol>
+&lt;h3 id="other-notes">Other notes&lt;/h3>
+&lt;ul>
+&lt;li>The “subring” implementation is unoptimized. We will optimize it as part of this work to make sure no performance degradation is introduced when using the subring vs the normal ring.&lt;/li>
+&lt;/ul></description></item><item><title>Docs: Support metadata API</title><link>/docs/proposals/support-metadata-api/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>/docs/proposals/support-metadata-api/</guid><description>
+&lt;ul>
+&lt;li>Author: @gotjosh&lt;/li>
+&lt;li>Reviewers: @gouthamve, @pracucci&lt;/li>
+&lt;li>Date: March 2020&lt;/li>
+&lt;li>Status: Accepted&lt;/li>
+&lt;/ul>
+&lt;h2 id="problem-statement">Problem Statement&lt;/h2>
+&lt;p>Prometheus holds metric metadata alongside the contents of a scrape. This metadata (&lt;code>HELP&lt;/code>, &lt;code>TYPE&lt;/code>, &lt;code>UNIT&lt;/code> and &lt;code>METRIC_NAME&lt;/code>) enables &lt;a href="https://github.com/prometheus/prometheus/issues/6395">some Prometheus API&lt;/a> endpoints to output the metadata for integrations (e.g. &lt;a href="https://github.com/grafana/grafana/pull/21124">Grafana&lt;/a>) to consume it.&lt;/p>
+&lt;p>At the moment of writing, Cortex does not support the &lt;code>api/v1/metadata&lt;/code> endpoint that Prometheus implements as metadata was never propagated via remote write. Recent &lt;a href="https://github.com/prometheus/prometheus/pull/6815/files">work is done in Prometheus&lt;/a> enables the propagation of metadata.&lt;/p>
+&lt;p>With this in place, remote write integrations such as Cortex can now receive this data and implement the API endpoint. This results in Cortex users being able to enjoy a tiny bit more insight on their metrics.&lt;/p>
+&lt;h2 id="potential-solutions">Potential Solutions&lt;/h2>
+&lt;p>Before we delve into the solutions, let&amp;rsquo;s set a baseline about how the data is received. This applies almost equally for the two.&lt;/p>
+&lt;p>Metadata from Prometheus is sent in the same &lt;a href="https://github.com/prometheus/prometheus/blob/master/prompb/remote.proto">&lt;code>WriteRequest&lt;/code> proto message&lt;/a> that the samples use. It is part of a different field (#3 given #2 is already &lt;a href="https://github.com/cortexproject/cortex/blob/master/pkg/ingester/client/cortex.proto#L36">used interally&lt;/a>), the data is a set identified by the metric name - that means it is aggregated across targets, and is sent all at once. Implying, Cortex will receive a single &lt;code>WriteRequest&lt;/code> containing a set of the metadata for that instance at an specified interval.&lt;/p>
+&lt;p>. It is also important to note that this current process is an intermediary step. Eventually, metadata in a request will be sent alongside samples and only for those included. The solutions proposed, take this nuance into account to avoid coupling between the current and future state of Prometheus, and hopefully do something now that also works for the future.&lt;/p>
+&lt;p>As a reference, these are some key numbers regarding the size (and send timings) of the data at hand from our clusters at Grafana Labs:&lt;/p>
+&lt;ul>
+&lt;li>On average, metadata (a combination of &lt;code>HELP&lt;/code>, &lt;code>TYPE&lt;/code>, &lt;code>UNIT&lt;/code> and &lt;code>METRIC_NAME&lt;/code>) is ~55 bytes uncompressed.&lt;/li>
+&lt;li>at GL, on an instance with about 2.6M active series, we hold ~1241 unique metrics in total.&lt;/li>
+&lt;li>with that, we can assume that on a worst-case scenario the metadata set for that instance is ~68 kilobytes uncompressed.&lt;/li>
+&lt;li>by default, this data is only propagated once every minute (aligning with the default scrape interval), but this can be adjusted.&lt;/li>
+&lt;li>Finally, what this gives us is a baseline worst-case scenario formula for the data to store per tenant: &lt;code>~68KB * Replication Factor * # of Instances&lt;/code>. Keeping in mind that typically, there&amp;rsquo;s a very high overlap of metadata across instances, and we plan to deduplicate in the ingesters.&lt;/li>
+&lt;/ul>
+&lt;h3 id="write-path">Write Path&lt;/h3>
+&lt;ol>
+&lt;li>Store the metadata directly from the distributors into a cache (e.g. Memcached)&lt;/li>
+&lt;/ol>
+&lt;p>Since metadata is received all at once, we could directly store into an external cache using the tenant ID as a key, and still, avoid a read-modify-write. However, a very common use case of Cortex is to have multiple Prometheus sending data for the same tenant ID. This complicates things, as it adds a need to have an intermediary merging phase and thus making a read-modify-write inevitable.&lt;/p>
+&lt;ol start="2">
+&lt;li>Keep metadata in memory within the ingesters&lt;/li>
+&lt;/ol>
+&lt;p>Similarly to what we do with sample data, we can keep the metadata in-memory in the ingesters and apply similar semantics. I propose to use the tenant ID as a hash key, distribute it to the ingesters (taking into account the replication factor), using a hash map to keep a set of the metadata across all instances for a single tenant, and implement a configurable time-based purge process to deal with metadata churn. Given, we need to ensure fair-use we also propose implementing limits for both the number of metadata entries we can receive and the size of a single entry.&lt;/p>
+&lt;h3 id="read-path">Read Path&lt;/h3>
+&lt;p>In my eyes, the read path seems to only have one option. At the moment of writing, Cortex uses a &lt;a href="https://github.com/cortexproject/cortex/blob/master/pkg/querier/dummy.go#L11-L20">&lt;code>DummyTargetRetriever&lt;/code>&lt;/a> as a way to signal that these API endpoints are not implemented. We&amp;rsquo;d need to modify the Prometheus interface to support a &lt;code>Context&lt;/code> and extract the tenant ID from there. Then, use the tenant ID to query the ingesters for the data, deduplicate it and serve it.&lt;/p>
+&lt;h2 id="conclusions">Conclusions&lt;/h2>
+&lt;p>I conclude that solution #2 is ideal for this work on the write path. It allows us to use similar semantics to samples, thus reducing operational complexity, and lays a groundwork for when we start receiving metadata alongside samples.&lt;/p>
+&lt;p>There&amp;rsquo;s one last piece to address: Allowing metadata to survive rolling restarts. Option #1 handles this well, given the aim would be to use an external cache such as Memcached. Option #2 lacks this, as it does not include any plans to persist this data. Given Prometheus (by default) sends metadata every minute, and we don&amp;rsquo;t need a high level of consistency. We expect that an eventual consistency of up to 1 minute on the default case is deemed acceptable.&lt;/p>
+&lt;h2 id="references">References&lt;/h2>
+&lt;ul>
+&lt;li>&lt;a href="https://docs.google.com/document/d/1LoCWPAIIbGSq59NG3ZYyvkeNb8Ymz28PUKbg_yhAzvE/edit#">Prometheus Propagate metadata via Remote Write Design Doc&lt;/a>&lt;/li>
+&lt;li>&lt;a href="https://github.com/prometheus/prometheus/issues/6395">Prometheus Propagate metadata via Remote Write Design Issue&lt;/a>&lt;/li>
+&lt;/ul></description></item></channel></rss>
