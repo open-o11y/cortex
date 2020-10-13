@@ -179,7 +179,7 @@ jobs:
           MIGRATIONS_DIR=$(pwd)/cmd/cortex/migrations
           make BUILD_IMAGE=quay.io/cortexproject/build-image:upgrade-build-image-debian-491e60715-WIP TTY='' configs-integration-test
   deploy_website:
-    needs: [build, test]
+    needs: [build]
     # if: github.ref == 'refs/heads/master' # uncomment in upstream PR
     runs-on: ubuntu-latest
     container:
