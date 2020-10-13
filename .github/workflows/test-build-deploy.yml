@@ -188,7 +188,7 @@ jobs:
       - name: Checkout Repo
         uses: actions/checkout@v2
         with:
-          ssh-key: ${{ secrets.SSH_PRIVATE_KEY }}
+          ssh-key: ${{ secrets.SSH_PRIVATE_KEY_2 }}
       - name: Sym Link Expected Path to Workspace
         run: |
           mkdir -p /go/src/github.com/cortexproject/cortex
@@ -205,7 +205,7 @@ jobs:
           mkdir -p ~/.ssh
           ssh-keyscan github.com >> ~/.ssh/known_hosts
           ssh-agent -a $SSH_AUTH_SOCK > /dev/null
-          ssh-add - <<< "${{ secrets.SSH_PRIVATE_KEY }}"
+          ssh-add - <<< "${{ secrets.SSH_PRIVATE_KEY_2 }}"
         shell: bash
       - name: Deploy Website
         run: |
