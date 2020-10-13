@@ -183,7 +183,7 @@ jobs:
     # if: github.ref == 'refs/heads/master' # uncomment in upstream PR
     runs-on: ubuntu-latest
     container:
-      image: quay.io/cortexproject/build-image:update-golang-1.14.9-eb0c8d4d2
+      image: quay.io/cortexproject/build-image:upgrade-build-image-debian-491e60715-WIP
     steps:
       - name: Checkout Repo
         uses: actions/checkout@v2
@@ -205,7 +205,7 @@ jobs:
           mkdir -p ~/.ssh
           ssh-keyscan github.com >> ~/.ssh/known_hosts
           ssh-agent -a $SSH_AUTH_SOCK > /dev/null
-          ssh-add - <<< "${{ secrets.SSH_PRIVATE_KEY_2 }}"
+          ssh-add - <<< "${{ secrets.SSH_PRIVATE_KEY }}"
       - name: Deploy Website
         run: make BUILD_IN_CONTAINER=false web-deploy
         env:
