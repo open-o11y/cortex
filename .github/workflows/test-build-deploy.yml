@@ -213,3 +213,4 @@ jobs:
           make BUILD_IN_CONTAINER=false web-deploy
         env:
           SSH_AUTH_SOCK: /tmp/ssh_agent.sock
+          GIT_SSH_COMMAND: "ssh -o StrictHostKeyChecking=no"
