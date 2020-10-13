@@ -90,7 +90,7 @@ jobs:
       - run: echo "$(cat ~/.ssh/known_hosts)"
       - run: echo "$(git config --local --get core.sshCommand)"
       - run: echo "$GIT_SSH_COMMAND"
-      - run: git config --global core.sshCommand 'ssh -o UserKnownHostsFile=~/.ssh/known_hosts -o StrictHostKeyChecking=no'
+      - run: git config --local core.sshCommand 'ssh -o UserKnownHostsFile=~/.ssh/known_hosts -o StrictHostKeyChecking=no'
       - run: echo "$(git config --local --get core.sshCommand)"
       - run: echo "$GIT_SSH_COMMAND"
       - run: echo "$SSH_AUTH_SOCK"
@@ -98,3 +98,4 @@ jobs:
         run: make BUILD_IN_CONTAINER=false web-deploy
         env:
           SSH_AUTH_SOCK: /tmp/ssh_agent.sock
+          GIT_SSH_COMMAND: "ssh -o StrictHostKeyChecking=no"
