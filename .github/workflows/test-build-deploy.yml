@@ -86,7 +86,7 @@ jobs:
           ln -s /tmp/images ./docker-images
           make BUILD_IN_CONTAINER=false save-images
       - name: Zip Images
-        run: tar -zcvf images.tar.gz /tmp/images
+        run: tar -cvf images.tar.gz /tmp/images
       - name: Upload Images Artifact
         uses: actions/upload-artifact@v2
         with:
@@ -148,14 +148,19 @@ jobs:
           curl -L -o /tmp/docker-$VER.tgz https://download.docker.com/linux/static/stable/x86_64/docker-$VER.tgz
           tar -xz -C /tmp -f /tmp/docker-$VER.tgz
           mv /tmp/docker/* /usr/bin
-      - name: Load cache from Build job
+      - name: Download Images Artifact
         uses: actions/download-artifact@v2
         with:
           name: Docker Images
-      - name: extract images from cache
-        run: tar -xzvf images.tar.gz -C /
+      - name: Unzip Images
+        run: tar -xvf images.tar.gz -C /
       - name: Load Images
-        run: ln -s /tmp/images ./docker-images; make BUILD_IN_CONTAINER=false load-images
+        run: |
+          echo "$(ls /)"
+          echo "$(ls /tmp/images)"
+          ln -s /tmp/images ./docker-images
+          echo "$(ls ./docker-images)"
+          make BUILD_IN_CONTAINER=false load-images
       - name: Deploy
         run: |
           if [ -n "$DOCKER_REGISTRY_PASSWORD" ]; then
