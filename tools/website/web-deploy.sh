@@ -16,7 +16,7 @@ cd gh-pages-branch
 git config --global user.email "$GH_EMAIL" > /dev/null 2>&1
 git config --global user.name "$GH_NAME" > /dev/null 2>&1
 git init
-git remote add --fetch origin "git@github.com:open-o11y/cortex.git"
+git remote add --fetch origin "$remote"
 
 # switch into the gh-pages branch
 if git rev-parse --verify origin/gh-pages > /dev/null 2>&1
