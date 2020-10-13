@@ -86,7 +86,7 @@ jobs:
           ln -s /tmp/images ./docker-images
           make BUILD_IN_CONTAINER=false save-images
       - name: Zip Images
-        run: tar -cvf images.tar.gz /tmp/images
+        run: tar -czvf images.tar.gz /tmp/images
       - name: Upload Images Artifact
         uses: actions/upload-artifact@v2
         with:
@@ -153,7 +153,7 @@ jobs:
         with:
           name: Docker Images
       - name: Unzip Images
-        run: tar -xvf images.tar.gz -C /
+        run: tar -xzvf images.tar.gz -C /
       - name: Load Images
         run: |
           echo "$(ls /)"
