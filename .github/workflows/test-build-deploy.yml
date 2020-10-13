@@ -57,7 +57,7 @@ jobs:
       - name: Checkout Repo
         uses: actions/checkout@v2
         with:
-          ssh-key: ${{ secrets.SSH_PRIVATE_KEY }}
+          ssh-key: ${{ secrets.SSH_PRIVATE_KEY_2 }}
       - name: Install Docker Client
         run: |
           set -x
@@ -80,7 +80,7 @@ jobs:
       - name: Add SSH Key
         uses: webfactory/ssh-agent@v0.4.1
         with:
-          ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
+          ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY_2 }}
       - name: Deploy Website
         run: make BUILD_IN_CONTAINER=false web-deploy
       - name: Save Images

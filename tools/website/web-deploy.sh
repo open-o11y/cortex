@@ -6,8 +6,8 @@ pwd
 
 remote=$(git config remote.origin.url)
 siteSource="website/public/"
-GH_EMAIL="azfaar.qureshi@gmail.com"
-GH_NAME="Azfaar Qureshi"
+GH_EMAIL="ci@cortexmetrics.io"
+GH_NAME="ci"
 
 # make a directory to put the gp-pages branch
 mkdir gh-pages-branch
@@ -17,7 +17,9 @@ git config --global user.email "$GH_EMAIL" > /dev/null 2>&1
 git config --global user.name "$GH_NAME" > /dev/null 2>&1
 git init
 git remote add --fetch origin "$remote"
-
+echo "$(git config user.name)"
+echo "$(git config user.email)"
+echo "$remote"
 # switch into the gh-pages branch
 if git rev-parse --verify origin/gh-pages > /dev/null 2>&1
 then
