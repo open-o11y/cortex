@@ -59,7 +59,6 @@ jobs:
         with:
           ssh-key: ${{ secrets.SSH_PRIVATE_KEY_2 }}
       - run: echo "$(git config remote.origin.url)"
-      - run: echo "$(cat ~/.ssh/known_hosts)"
       - name: Install Docker Client
         run: |
           set -x
@@ -76,10 +75,14 @@ jobs:
           touch build-image/.uptodate
           make BUILD_IN_CONTAINER=false web-build
       - run: rm -rf ~/.ssh/known_hosts
-      - name: Add SSH Key
-        uses: webfactory/ssh-agent@v0.4.1
-        with:
-          ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY_2 }}
+      - name: Setup SSH Keys and known_hosts
+        env:
+          SSH_AUTH_SOCK: /tmp/ssh_agent.sock
+        run: |
+          mkdir -p ~/.ssh
+          ssh-keyscan github.com >> ~/.ssh/known_hosts
+          ssh-agent -a $SSH_AUTH_SOCK > /dev/null
+          ssh-add - <<< "${{ secrets.SSH_PRIVATE_KEY_2 }}"
       - name: Deploy Website
         run: make BUILD_IN_CONTAINER=false web-deploy
         env:
