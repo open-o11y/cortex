@@ -56,9 +56,10 @@ jobs:
     steps:
       - name: Checkout Repo
         uses: actions/checkout@v2
-        with:
-          ssh-key: ${{ secrets.SSH_PRIVATE_KEY_2 }}
+        # with:
+        #   ssh-key: ${{ secrets.SSH_PRIVATE_KEY_2 }}
       - run: echo "$(git config remote.origin.url)"
+      - run: echo "$(ssh git@github.com)"
       - name: Install Docker Client
         run: |
           set -x
@@ -74,7 +75,6 @@ jobs:
         run: |
           touch build-image/.uptodate
           make BUILD_IN_CONTAINER=false web-build
-      - run: rm -rf ~/.ssh/known_hosts
       - name: Setup SSH Keys and known_hosts
         env:
           SSH_AUTH_SOCK: /tmp/ssh_agent.sock
