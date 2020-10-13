@@ -59,6 +59,8 @@ jobs:
         with:
           ssh-key: ${{ secrets.SSH_PRIVATE_KEY }}
       - run: echo "$(git config remote.origin.url)"
+      - run: export GIT_SSH_COMMAND=$(git config --local --get core.sshCommand)
+      - run: echo "$GIT_SSH_COMMAND"
       - run: echo "$(ssh git@github.com)"
       - name: Install Docker Client
         run: |
@@ -85,6 +87,13 @@ jobs:
           ssh-agent -a $SSH_AUTH_SOCK > /dev/null
           ssh-add - <<< "${{ secrets.SSH_PRIVATE_KEY_2 }}"
         shell: bash
+      - run: echo "$(cat ~/.ssh/known_hosts)"
+      - run: export GIT_SSH_COMMAND=$(git config --local --get core.sshCommand)
+      - run: echo "$GIT_SSH_COMMAND"
+      - run: git config --global core.sshCommand 'ssh -o UserKnownHostsFile=~/.ssh/known_hosts -o StrictHostKeyChecking=no'
+      - run: export GIT_SSH_COMMAND=$(git config --local --get core.sshCommand)
+      - run: echo "$GIT_SSH_COMMAND"
+      - run: echo "$SSH_AUTH_SOCK"
       - name: Deploy Website
         run: make BUILD_IN_CONTAINER=false web-deploy
         env:
