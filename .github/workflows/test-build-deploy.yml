@@ -133,7 +133,7 @@ jobs:
     # if: github.ref == 'refs/heads/master' && github.repository == 'cortexproject/cortex'
     runs-on: ubuntu-latest
     container:
-      image: quay.io/cortexproject/build-image:update-golang-1.14.9-eb0c8d4d2
+      image: quay.io/cortexproject/build-image:upgrade-build-image-debian-491e60715-WIP
     steps:
       - name: Checkout Repo
         uses: actions/checkout@v2
