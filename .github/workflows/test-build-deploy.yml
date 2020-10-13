@@ -136,7 +136,7 @@ jobs:
       image: quay.io/cortexproject/build-image:update-golang-1.14.9-eb0c8d4d2
     steps:
       - name: Checkout Repo
-        uses: actions/checkout@v1
+        uses: actions/checkout@v2
       - name: Sym link expected path to github workspace
         run: |
           mkdir -p /go/src/github.com/cortexproject/cortex
