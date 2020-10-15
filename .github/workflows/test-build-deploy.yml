@@ -5,6 +5,11 @@ on: [push]
   #   tags:
   #     - v[0-9]+.[0-9]+.[0-9]+** # Tag filters not as strict due to different regex system on Github Actions
   # pull_request:
+
+default:
+  env:
+    DOCKER_VERSION: "17.03.0-ce"
+
 jobs:
   lint:
     runs-on: ubuntu-latest
@@ -89,8 +94,6 @@ jobs:
     needs: build
     runs-on: ubuntu-16.04
     steps:
-      - name: Install Docker Client
-        run: ./.github/workflows/scripts/install-docker.sh
       - name: Upgrade golang
         run: |
           cd /tmp
@@ -101,6 +104,8 @@ jobs:
           cd -
       - name: Checkout Repo
         uses: actions/checkout@v2
+      - name: Install Docker Client
+        run: sudo ./.github/workflows/scripts/install-docker.sh
       - name: Sym Link Expected Path to Workspace
         run: |
           sudo mkdir -p /go/src/github.com/cortexproject/cortex
@@ -150,7 +155,7 @@ jobs:
       - name: Checkout Repo
         uses: actions/checkout@v2
       - name: Install Docker Client
-        run: ./.github/workflows/scripts/install-docker.sh
+        run: sudo ./.github/workflows/scripts/install-docker.sh
       - name: Download Docker Images Artifact
         uses: actions/download-artifact@v2
         with:
