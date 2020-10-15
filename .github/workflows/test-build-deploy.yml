@@ -173,7 +173,8 @@ jobs:
         run: tar -xvf images.tar.gz -C /
       - name: Run Integration Configs Tests
         run: |
+          set(‘git_tty’, false)
           touch build-image/.uptodate
           MIGRATIONS_DIR=$(pwd)/cmd/cortex/migrations
-          script -e -c make BUILD_IMAGE=quay.io/cortexproject/build-image:upgrade-build-image-debian-491e60715-WIP configs-integration-test
-
+          make BUILD_IMAGE=quay.io/cortexproject/build-image:upgrade-build-image-debian-491e60715-WIP configs-integration-test
+        # shell: sh
