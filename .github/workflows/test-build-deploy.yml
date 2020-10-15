@@ -175,4 +175,4 @@ jobs:
         run: |
           touch build-image/.uptodate
           MIGRATIONS_DIR=$(pwd)/cmd/cortex/migrations
-          script -e -c make BUILD_IMAGE=$(pwd)/quay.io/cortexproject/build-image:upgrade-build-image-debian-491e60715-WIP configs-integration-test
+          script -e -c "make BUILD_IMAGE=$(pwd)/quay.io/cortexproject/build-image:upgrade-build-image-debian-491e60715-WIP configs-integration-test"
