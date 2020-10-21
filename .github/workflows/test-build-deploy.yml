@@ -188,18 +188,10 @@ jobs:
         with:
           name: website public
           path: website/public
-      - name: Setup SSH Keys and known_hosts for Github Authentication to Deploy Website
-        run: |
-          ssh-agent -a $SSH_AUTH_SOCK > /dev/null
-          ssh-add - <<< "${{ secrets.WEBSITE_DEPLOY_SSH_PRIVATE_KEY }}"
-        env:
-          SSH_AUTH_SOCK: /tmp/ssh_agent.sock
-        shell: bash
       - name: Deploy Website
         # SSH is used to authentricate with Github because web-deploy script uses git to checkout and push to gh-pages
         run: make BUILD_IN_CONTAINER=false web-deploy
         env:
-          SSH_AUTH_SOCK: /tmp/ssh_agent.sock
           GIT_SSH_COMMAND: "ssh -o StrictHostKeyChecking=no"
 
   deploy:
